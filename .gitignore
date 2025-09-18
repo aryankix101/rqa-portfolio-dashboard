@@ -42,10 +42,10 @@ env/
 *.xls
 *.csv
 database_exports/
-gam_monthly_report.txt
-
+gam_monthly_report_20250910.txt
 # PDF files (fact sheets, reports)
 *.pdf
+*.pptx
 
 # Images and logos
 *.png
