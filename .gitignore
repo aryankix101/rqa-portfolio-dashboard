@@ -22,6 +22,9 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+#Secrets
+secrets.toml
+
 # Virtual Environment
 .venv/
 venv/

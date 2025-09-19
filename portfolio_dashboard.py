@@ -6,6 +6,15 @@ from plotly.subplots import make_subplots
 import sqlite3
 import numpy as np
 from datetime import datetime, timedelta
+import os
+
+# PostgreSQL imports with error handling
+try:
+    from sqlalchemy import create_engine, text
+    import psycopg2
+    POSTGRES_AVAILABLE = True
+except ImportError:
+    POSTGRES_AVAILABLE = False
 
 # Configure Streamlit page
 st.set_page_config(
@@ -16,23 +25,137 @@ st.set_page_config(
 
 @st.cache_data
 def load_data():
-    """Load all data from the database"""
+    """Load all data from the database (PostgreSQL or SQLite fallback)"""
+    
+    # Try PostgreSQL first if available
+    if POSTGRES_AVAILABLE:
+        try:
+            return load_data_postgres()
+        except Exception as e:
+            st.warning(f"PostgreSQL connection failed: {str(e)}. Using SQLite fallback.")
+    
+    # Fallback to SQLite
+    return load_data_sqlite()
+
+def get_db_connection():
+    """Get database connection string from secrets"""
+    try:
+        # Streamlit Cloud secrets
+        if hasattr(st, 'secrets') and 'db_url' in st.secrets:
+            return st.secrets['db_url']
+        
+        # Local development with secrets.toml
+        try:
+            import toml
+            if os.path.exists('secrets.toml'):
+                secrets = toml.load('secrets.toml')
+                return secrets.get('db_url')
+        except ImportError:
+            pass
+        
+        return None
+    except Exception:
+        return None
+
+def load_data_postgres():
+    """Load data from PostgreSQL database"""
+    db_url = get_db_connection()
+    if not db_url:
+        raise Exception("No PostgreSQL connection string found")
+    
+    engine = create_engine(db_url, connect_args={"sslmode": "require"})
+    
+    try:
+        # Load all tables
+        monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", engine)
+        
+        # Get current GAM allocations
+        current_gam_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date >= '2025-09-01' ORDER BY date, asset_symbol", engine)
+        
+        # Get historical allocations
+        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", engine)
+        
+        # Get historical attribution
+        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", engine)
+        
+        benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", engine)
+        
+        # Use historical data for trailing 12 months view
+        trailing_12m_allocations = historical_allocations.copy()
+        trailing_12m_attribution = historical_attribution.copy()
+        
+        # Convert date columns
+        for df in [monthly_returns, current_gam_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+        
+        return {
+            'monthly_returns': monthly_returns,
+            'gam_allocations': current_gam_allocations,
+            'gam_attribution': historical_attribution,
+            'benchmark_performance': benchmark_performance,
+            'trailing_12m_allocations': trailing_12m_allocations,
+            'trailing_12m_attribution': trailing_12m_attribution
+        }
+        
+    finally:
+        engine.dispose()
+
+def load_data_sqlite():
+    """Load data from SQLite database (fallback)"""
+    if not os.path.exists('portfolio_data.db'):
+        st.error("Database not found! Please run the migration script or ensure your database is available.")
+        return create_empty_data_structure()
+    
     conn = sqlite3.connect('portfolio_data.db')
     
-    # Load all tables
-    monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", conn)
-    
-    # Get current GAM allocations (most recent daily data for current allocation display)
-    current_gam_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date >= '2025-09-01' ORDER BY date, asset_symbol", conn)
-    
-    # Get historical allocations (only completed months for trailing 12M analysis)
-    # Only include data up to the last completed month (July 2025)
-    historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", conn)
-    
-    # Get historical attribution (only completed months)
-    historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", conn)
-    
-    benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", conn)
+    try:
+        # Load all tables
+        monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", conn)
+        
+        # Get current GAM allocations (most recent daily data for current allocation display)
+        current_gam_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date >= '2025-09-01' ORDER BY date, asset_symbol", conn)
+        
+        # Get historical allocations (only completed months for trailing 12M analysis)
+        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", conn)
+        
+        # Get historical attribution (only completed months)
+        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", conn)
+        
+        benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", conn)
+        
+        # Use historical data for trailing 12 months view (completed months only)
+        trailing_12m_allocations = historical_allocations.copy()
+        trailing_12m_attribution = historical_attribution.copy()
+        
+        # Convert date columns
+        for df in [monthly_returns, current_gam_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
+            if 'date' in df.columns:
+                df['date'] = pd.to_datetime(df['date'])
+        
+        return {
+            'monthly_returns': monthly_returns,
+            'gam_allocations': current_gam_allocations,
+            'gam_attribution': historical_attribution,
+            'benchmark_performance': benchmark_performance,
+            'trailing_12m_allocations': trailing_12m_allocations,
+            'trailing_12m_attribution': trailing_12m_attribution
+        }
+        
+    finally:
+        conn.close()
+
+def create_empty_data_structure():
+    """Create empty data structure for when database is not available"""
+    empty_df = pd.DataFrame()
+    return {
+        'monthly_returns': empty_df,
+        'gam_allocations': empty_df,
+        'gam_attribution': empty_df,
+        'benchmark_performance': empty_df,
+        'trailing_12m_allocations': empty_df,
+        'trailing_12m_attribution': empty_df
+    }
     
     # Use historical data for trailing 12 months view (completed months only)
     trailing_12m_allocations = historical_allocations.copy()
