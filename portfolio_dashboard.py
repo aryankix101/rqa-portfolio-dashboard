@@ -742,8 +742,11 @@ def create_attribution_chart(data):
     
     return fig
 
-def calculate_ga_performance_metrics(monthly_returns_df):
+def calculate_ga_performance_metrics(data_dict):
     """Calculate GA performance metrics from monthly returns data"""
+    monthly_returns_df = data_dict['monthly_returns']
+    benchmark_data = data_dict['benchmark_performance']
+    
     df = monthly_returns_df.copy()
     df['date'] = pd.to_datetime(df['date'])
     
@@ -789,11 +792,9 @@ def calculate_ga_performance_metrics(monthly_returns_df):
     annual_volatility = df['gam_returns_net'].std() * np.sqrt(12)
     sharpe_ratio = (since_inception_annualized / annual_volatility) if annual_volatility > 0 else 0
     
-    # Get beta from database instead of hardcoding
-    conn = sqlite3.connect('portfolio_data.db')
-    benchmark_data = pd.read_sql_query("SELECT beta_to_sp500 FROM benchmark_performance WHERE portfolio = 'GAM'", conn)
-    beta_to_sp500 = benchmark_data['beta_to_sp500'].iloc[0] if not benchmark_data.empty else 0.75
-    conn.close()
+    # Get beta from already loaded benchmark data
+    gam_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GAM']
+    beta_to_sp500 = gam_benchmark['beta_to_sp500'].iloc[0] if not gam_benchmark.empty else 0.75
     
     # Max drawdown calculation
     cumulative_returns = (1 + df['gam_returns_net']).cumprod()
@@ -1019,7 +1020,7 @@ def main():
     data = load_data()
     
     # Calculate key metrics for display
-    ga_metrics = calculate_ga_performance_metrics(data['monthly_returns'])
+    ga_metrics = calculate_ga_performance_metrics(data)
     
     # Add logo to sidebar above navigation
     st.sidebar.image("logo.png", width=200)
