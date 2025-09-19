@@ -1453,10 +1453,6 @@ def create_analytics_dashboard(data, ga_metrics):
     # Footer
     st.markdown("---")
     st.markdown("**Data Source:** GAM Portfolio Analytics Database | **Last Updated:** September 2025")
-    
-    # Debug section (expandable)
-    with st.expander("🔧 Debug Information", expanded=False):
-        debug_environment()
 
 if __name__ == "__main__":
     main()
