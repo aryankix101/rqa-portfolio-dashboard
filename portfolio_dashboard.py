@@ -16,6 +16,33 @@ try:
 except ImportError:
     POSTGRES_AVAILABLE = False
 
+def debug_environment():
+    """Debug function to check environment and secrets"""
+    st.write("## 🔍 Environment Debug Info")
+    
+    # Check if we're on Streamlit Cloud
+    cloud_deployment = hasattr(st, 'secrets') and len(st.secrets) > 0
+    st.write(f"**Streamlit Cloud Deployment:** {cloud_deployment}")
+    
+    # Check secrets availability
+    st.write(f"**Has st.secrets:** {hasattr(st, 'secrets')}")
+    if hasattr(st, 'secrets'):
+        st.write(f"**Secrets keys:** {list(st.secrets.keys()) if st.secrets else 'None'}")
+        if 'db_url' in st.secrets:
+            # Show masked version
+            db_url = st.secrets['db_url']
+            masked_url = db_url[:20] + "..." + db_url[-10:] if len(db_url) > 30 else "Found"
+            st.write(f"**Database URL:** {masked_url}")
+    
+    # Check PostgreSQL availability
+    st.write(f"**PostgreSQL packages available:** {POSTGRES_AVAILABLE}")
+    
+    # Check local files
+    st.write(f"**Local secrets.toml exists:** {os.path.exists('secrets.toml')}")
+    st.write(f"**Local SQLite DB exists:** {os.path.exists('portfolio_data.db')}")
+    
+    st.write("---")
+
 # Configure Streamlit page
 st.set_page_config(
     page_title="Strategy Fact Sheet",
@@ -25,49 +52,75 @@ st.set_page_config(
 
 @st.cache_data
 def load_data():
-    """Load all data from the database (PostgreSQL or SQLite fallback)"""
+    """Load all data from the database (PostgreSQL primary, SQLite local fallback)"""
     
-    # Try PostgreSQL first if available
-    if POSTGRES_AVAILABLE:
+    # Check if we have a database connection string (indicates cloud deployment)
+    db_url = get_db_connection()
+    
+    if db_url and POSTGRES_AVAILABLE:
+        try:
+            st.info("🔗 Connecting to PostgreSQL database...")
+            return load_data_postgres()
+        except Exception as e:
+            st.error(f"❌ PostgreSQL connection failed: {str(e)}")
+            st.error("Please check your database connection in Streamlit secrets.")
+            # Don't fallback in cloud - show the error instead
+            raise e
+    elif POSTGRES_AVAILABLE:
+        # Try local PostgreSQL if secrets exist locally
         try:
             return load_data_postgres()
         except Exception as e:
-            st.warning(f"PostgreSQL connection failed: {str(e)}. Using SQLite fallback.")
-    
-    # Fallback to SQLite
-    return load_data_sqlite()
+            st.warning(f"PostgreSQL unavailable: {str(e)}. Using local SQLite.")
+            return load_data_sqlite()
+    else:
+        # No PostgreSQL available, use SQLite
+        st.info("📁 Using local SQLite database...")
+        return load_data_sqlite()
 
 def get_db_connection():
     """Get database connection string from secrets"""
     try:
-        # Streamlit Cloud secrets
+        # Streamlit Cloud secrets (primary for deployment)
         if hasattr(st, 'secrets') and 'db_url' in st.secrets:
-            return st.secrets['db_url']
+            db_url = st.secrets['db_url']
+            st.success(f"✅ Found database connection in Streamlit secrets")
+            return db_url
         
         # Local development with secrets.toml
         try:
             import toml
             if os.path.exists('secrets.toml'):
                 secrets = toml.load('secrets.toml')
-                return secrets.get('db_url')
+                db_url = secrets.get('db_url')
+                if db_url:
+                    st.info("📋 Using local secrets.toml for database connection")
+                    return db_url
         except ImportError:
             pass
         
         return None
-    except Exception:
+    except Exception as e:
+        st.error(f"Error accessing secrets: {e}")
         return None
 
 def load_data_postgres():
     """Load data from PostgreSQL database"""
     db_url = get_db_connection()
     if not db_url:
-        raise Exception("No PostgreSQL connection string found")
-    
-    engine = create_engine(db_url, connect_args={"sslmode": "require"})
+        raise Exception("No PostgreSQL connection string found in secrets")
     
     try:
+        engine = create_engine(db_url, connect_args={"sslmode": "require"})
+        
+        # Test connection first
+        with engine.connect() as test_conn:
+            test_conn.execute(text("SELECT 1"))
+            st.success("✅ Database connection successful")
+        
         # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", engine)
+        st.success(f"📊 Loaded {len(monthly_returns)} monthly return records")
         
         # Get current GAM allocations
         current_gam_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date >= '2025-09-01' ORDER BY date, asset_symbol", engine)
@@ -79,6 +132,7 @@ def load_data_postgres():
         historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", engine)
         
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", engine)
+        st.success(f"📈 Loaded benchmark data for {len(benchmark_performance)} portfolios")
         
         # Use historical data for trailing 12 months view
         trailing_12m_allocations = historical_allocations.copy()
@@ -98,8 +152,12 @@ def load_data_postgres():
             'trailing_12m_attribution': trailing_12m_attribution
         }
         
+    except Exception as e:
+        st.error(f"Database query failed: {str(e)}")
+        raise e
     finally:
-        engine.dispose()
+        if 'engine' in locals():
+            engine.dispose()
 
 def load_data_sqlite():
     """Load data from SQLite database (fallback)"""
@@ -1402,6 +1460,10 @@ def create_analytics_dashboard(data, ga_metrics):
     # Footer
     st.markdown("---")
     st.markdown("**Data Source:** GAM Portfolio Analytics Database | **Last Updated:** September 2025")
+    
+    # Debug section (expandable)
+    with st.expander("🔧 Debug Information", expanded=False):
+        debug_environment()
 
 if __name__ == "__main__":
     main()
