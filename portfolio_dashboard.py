@@ -59,7 +59,6 @@ def load_data():
     
     if db_url and POSTGRES_AVAILABLE:
         try:
-            st.info("🔗 Connecting to PostgreSQL database...")
             return load_data_postgres()
         except Exception as e:
             st.error(f"❌ PostgreSQL connection failed: {str(e)}")
@@ -75,7 +74,6 @@ def load_data():
             return load_data_sqlite()
     else:
         # No PostgreSQL available, use SQLite
-        st.info("📁 Using local SQLite database...")
         return load_data_sqlite()
 
 def get_db_connection():
@@ -83,9 +81,7 @@ def get_db_connection():
     try:
         # Streamlit Cloud secrets (primary for deployment)
         if hasattr(st, 'secrets') and 'db_url' in st.secrets:
-            db_url = st.secrets['db_url']
-            st.success(f"✅ Found database connection in Streamlit secrets")
-            return db_url
+            return st.secrets['db_url']
         
         # Local development with secrets.toml
         try:
@@ -94,7 +90,6 @@ def get_db_connection():
                 secrets = toml.load('secrets.toml')
                 db_url = secrets.get('db_url')
                 if db_url:
-                    st.info("📋 Using local secrets.toml for database connection")
                     return db_url
         except ImportError:
             pass
@@ -116,11 +111,9 @@ def load_data_postgres():
         # Test connection first
         with engine.connect() as test_conn:
             test_conn.execute(text("SELECT 1"))
-            st.success("✅ Database connection successful")
         
         # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", engine)
-        st.success(f"📊 Loaded {len(monthly_returns)} monthly return records")
         
         # Get current GAM allocations
         current_gam_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date >= '2025-09-01' ORDER BY date, asset_symbol", engine)
@@ -132,7 +125,6 @@ def load_data_postgres():
         historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", engine)
         
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", engine)
-        st.success(f"📈 Loaded benchmark data for {len(benchmark_performance)} portfolios")
         
         # Use historical data for trailing 12 months view
         trailing_12m_allocations = historical_allocations.copy()
