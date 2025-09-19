@@ -50,13 +50,6 @@ gam_monthly_report_20250910.txt
 *.pdf
 *.pptx
 
-# Images and logos
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.svg
-*.ico
 
 # macOS
 .DS_Store
