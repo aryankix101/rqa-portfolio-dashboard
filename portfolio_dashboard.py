@@ -115,18 +115,22 @@ def load_data_postgres():
         # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", engine)
         
-        # Get current GAM allocations
-        current_gam_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date >= '2025-09-01' ORDER BY date, asset_symbol", engine)
+        # Get most recent GAM allocations (for current allocation display)
+        current_gam_allocations = pd.read_sql_query("""
+            SELECT * FROM gam_allocations 
+            WHERE date = (SELECT MAX(date) FROM gam_allocations)
+            ORDER BY asset_symbol
+        """, engine)
         
-        # Get historical allocations
-        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", engine)
+        # Get historical allocations (for trailing 12M analysis)
+        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations ORDER BY date, asset_symbol", engine)
         
-        # Get historical attribution
-        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", engine)
+        # Get historical attribution (for attribution analysis)
+        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution ORDER BY date, asset_symbol", engine)
         
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", engine)
         
-        # Use historical data for trailing 12 months view
+        # Use all historical data for trailing 12 months view (will be filtered in chart functions)
         trailing_12m_allocations = historical_allocations.copy()
         trailing_12m_attribution = historical_attribution.copy()
         
@@ -163,14 +167,18 @@ def load_data_sqlite():
         # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", conn)
         
-        # Get current GAM allocations (most recent daily data for current allocation display)
-        current_gam_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date >= '2025-09-01' ORDER BY date, asset_symbol", conn)
+        # Get most recent GAM allocations (for current allocation display)
+        current_gam_allocations = pd.read_sql_query("""
+            SELECT * FROM gam_allocations 
+            WHERE date = (SELECT MAX(date) FROM gam_allocations)
+            ORDER BY asset_symbol
+        """, conn)
         
-        # Get historical allocations (only completed months for trailing 12M analysis)
-        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", conn)
+        # Get historical allocations (for trailing 12M analysis)
+        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations ORDER BY date, asset_symbol", conn)
         
-        # Get historical attribution (only completed months)
-        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution WHERE date <= '2025-07-31' ORDER BY date, asset_symbol", conn)
+        # Get historical attribution (for attribution analysis)
+        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution ORDER BY date, asset_symbol", conn)
         
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", conn)
         
@@ -237,9 +245,8 @@ def create_growth_chart(data):
     # GA strategy growth
     df['ga_cumulative'] = initial_investment * (1 + df['gam_returns_net']).cumprod()
     
-    # Create benchmark data (simplified for demo - in real implementation you'd have actual benchmark data)
-    # For now, using estimated benchmark performance
-    df['benchmark_60_40'] = initial_investment * (1 + df['gam_returns_net'] * 0.85).cumprod()  # Slightly lower returns
+    # Use actual 60/40 portfolio returns from database instead of approximation
+    df['benchmark_60_40'] = initial_investment * (1 + df['portfolio_60_40']).cumprod()
     
     fig = go.Figure()
     
@@ -321,8 +328,14 @@ def create_trailing_12m_allocations_chart(data):
     # Filter for trailing 12 months from the last available month-end
     df['date'] = pd.to_datetime(df['date'])
     latest_date = df['date'].max()
-    twelve_months_ago = latest_date - timedelta(days=365)
-    df = df[df['date'] >= twelve_months_ago]
+    
+    # Handle case where latest_date is NaT (no valid dates)
+    if pd.isna(latest_date):
+        # If no valid dates, just use all available data
+        pass
+    else:
+        twelve_months_ago = latest_date - timedelta(days=365)
+        df = df[df['date'] >= twelve_months_ago]
     
     # Group by month-end dates to get one entry per month
     df['month_end'] = df['date'].dt.to_period('M').dt.end_time
@@ -665,8 +678,14 @@ def create_attribution_chart(data):
     # Filter for trailing 12 months
     df['date'] = pd.to_datetime(df['date'])
     latest_date = df['date'].max()
-    twelve_months_ago = latest_date - timedelta(days=365)
-    df = df[df['date'] >= twelve_months_ago]
+    
+    # Handle case where latest_date is NaT (no valid dates)
+    if pd.isna(latest_date):
+        # If no valid dates, just use all available data
+        pass
+    else:
+        twelve_months_ago = latest_date - timedelta(days=365)
+        df = df[df['date'] >= twelve_months_ago]
     
     # Create month-year labels for x-axis - use month-end grouping to avoid duplicates
     df['month_end'] = df['date'].dt.to_period('M').dt.end_time
@@ -735,109 +754,106 @@ def create_attribution_chart(data):
     return fig
 
 def calculate_ga_performance_metrics(data_dict):
-    """Calculate GA performance metrics from monthly returns data"""
-    monthly_returns_df = data_dict['monthly_returns']
+    """Get GA performance metrics from database and calculate 3-year return"""
     benchmark_data = data_dict['benchmark_performance']
+    monthly_returns_df = data_dict['monthly_returns']
     
-    df = monthly_returns_df.copy()
-    df['date'] = pd.to_datetime(df['date'])
-    
-    # Current year and date calculations
-    current_date = df['date'].max()
-    current_year = current_date.year
-    
-    # YTD return
-    ytd_data = df[df['date'].dt.year == current_year]
-    ytd_return = (1 + ytd_data['gam_returns_net']).prod() - 1
-    
-    # 1-year return (trailing 12 months)
-    one_year_ago = current_date - timedelta(days=365)
-    one_year_data = df[df['date'] >= one_year_ago]
-    one_year_return = (1 + one_year_data['gam_returns_net']).prod() - 1
-    
-    # 3-year return (annualized) - using exactly 36 months
-    three_years_ago = current_date - timedelta(days=3*365.25)  # More precise calculation
-    three_year_data = df[df['date'] >= three_years_ago]
-    if len(three_year_data) >= 24:  # Ensure we have at least 2 years of data
-        three_year_total_return = (1 + three_year_data['gam_returns_net']).prod() - 1
-        years = len(three_year_data) / 12
-        three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
-    else:
-        three_year_annualized = 0
-    
-    # 5-year return (annualized)
-    five_years_ago = current_date - timedelta(days=5*365)
-    five_year_data = df[df['date'] >= five_years_ago]
-    if len(five_year_data) > 0:
-        five_year_total_return = (1 + five_year_data['gam_returns_net']).prod() - 1
-        years = len(five_year_data) / 12
-        five_year_annualized = (1 + five_year_total_return) ** (1/years) - 1 if years > 0 else 0
-    else:
-        five_year_annualized = 0
-    
-    # Since inception return (annualized)
-    inception_total_return = (1 + df['gam_returns_net']).prod() - 1
-    years_since_inception = len(df) / 12
-    since_inception_annualized = (1 + inception_total_return) ** (1/years_since_inception) - 1 if years_since_inception > 0 else 0
-    
-    # Risk metrics
-    annual_volatility = df['gam_returns_net'].std() * np.sqrt(12)
-    sharpe_ratio = (since_inception_annualized / annual_volatility) if annual_volatility > 0 else 0
-    
-    # Get beta from already loaded benchmark data
+    # Get GAM performance metrics from database
     gam_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GAM']
-    beta_to_sp500 = gam_benchmark['beta_to_sp500'].iloc[0] if not gam_benchmark.empty else 0.75
     
-    # Max drawdown calculation
-    cumulative_returns = (1 + df['gam_returns_net']).cumprod()
-    rolling_max = cumulative_returns.expanding().max()
-    drawdowns = (cumulative_returns - rolling_max) / rolling_max
-    max_drawdown = abs(drawdowns.min())
-    
-    # Downside deviation
-    negative_returns = df['gam_returns_net'][df['gam_returns_net'] < 0]
-    downside_deviation = negative_returns.std() * np.sqrt(12) if len(negative_returns) > 0 else 0
-    
-    return {
-        'ytd': ytd_return,
-        'one_year': one_year_return,
-        'three_year': three_year_annualized,
-        'five_year': five_year_annualized,
-        'since_inception': since_inception_annualized,
-        'standard_deviation': annual_volatility,
-        'sharpe_ratio': sharpe_ratio,
-        'beta_to_sp500': beta_to_sp500,
-        'max_drawdown': max_drawdown,
-        'downside_deviation': downside_deviation
-    }
+    if not gam_benchmark.empty:
+        gam_data = gam_benchmark.iloc[0]
+        
+        # Calculate 3-year return from monthly returns data
+        df = monthly_returns_df.copy()
+        df['date'] = pd.to_datetime(df['date'])
+        current_date = df['date'].max()
+        three_years_ago = current_date - timedelta(days=3*365.25)
+        three_year_data = df[df['date'] >= three_years_ago]
+        
+        if len(three_year_data) >= 24:  # Ensure we have at least 2 years of data
+            three_year_total_return = (1 + three_year_data['gam_returns_net']).prod() - 1
+            years = len(three_year_data) / 12
+            three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
+        else:
+            three_year_annualized = 0.0
+        
+        return {
+            'ytd': gam_data['ytd'],
+            'one_year': gam_data['one_year'],
+            'three_year': three_year_annualized,  # Calculated from monthly returns
+            'five_year': gam_data['five_year'],
+            'since_inception': gam_data['since_inception'],
+            'standard_deviation': gam_data['standard_deviation'],
+            'sharpe_ratio': gam_data['sharpe_ratio'],
+            'beta_to_sp500': gam_data['beta_to_sp500'],
+            'max_drawdown': 0.0,  # Not stored in database yet, could be added later
+            'downside_deviation': 0.0  # Not stored in database yet, could be added later
+        }
+    else:
+        # Fallback to default values if no data found
+        return {
+            'ytd': 0.0,
+            'one_year': 0.0,
+            'three_year': 0.0,
+            'five_year': 0.0,
+            'since_inception': 0.0,
+            'standard_deviation': 0.0,
+            'sharpe_ratio': 0.0,
+            'beta_to_sp500': 0.0,
+            'max_drawdown': 0.0,
+            'downside_deviation': 0.0
+        }
 
 def create_allocation_pie_chart(data):
     """Create current allocation pie chart"""
     df = data['gam_allocations'].copy()  # Use current GAM allocations
     
+    if df.empty:
+        # Create empty chart with message
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No allocation data available",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, xanchor='center', yanchor='middle',
+            showarrow=False, font=dict(size=16)
+        )
+        fig.update_layout(
+            title='Current Asset Allocation',
+            height=500
+        )
+        return fig
+    
     # Get latest allocation
     df['date'] = pd.to_datetime(df['date'])
     latest_date = df['date'].max()
-    latest_allocation = df[df['date'] == latest_date]
     
     # Create asset name mapping for cleaner display
     asset_name_map = {
-        'SPDR Portfolio S&P 500 ETF': 'S&P 500',
+        'SPDR Portfolio S&P 500 ETF': 'U.S. Stocks (S&P 500)',
         'iShares Gold Trust': 'Gold',
-        'Vanguard FTSE Developed Markets ETF': 'Intl. Dev. Stocks',
-        'Vanguard Real Estate Index Fund': 'U.S. REITs',
-        'Schwab Emerging Markets Equity ETF': 'EM Stocks',
+        'Vanguard FTSE Developed Markets ETF': 'International Developed Stocks',
+        'Vanguard Real Estate Index Fund': 'U.S. Real Estate (REITs)',
+        'Schwab Emerging Markets Equity ETF': 'Emerging Market Stocks',
         'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
-        'iShares 20+ Year Treasury Bond ETF': 'U.S. LT Treas',
+        'iShares 20+ Year Treasury Bond ETF': 'U.S. Long Term Treasuries',
         'Cash': 'Cash',
-        'SP500': 'S&P 500',
-        'US_REITs': 'U.S. REITs', 
-        'US_LT_Treas': 'U.S. LT Treas',
-        'Intl_Dev_Stocks': 'Intl. Dev. Stocks',
-        'EM_Stocks': 'EM Stocks',
+        'SP500': 'U.S. Stocks (S&P 500)',
+        'US_REITs': 'U.S. Real Estate (REITs)', 
+        'US_LT_Treas': 'U.S. Long Term Treasuries',
+        'Intl_Dev_Stocks': 'International Developed Stocks',
+        'EM_Stocks': 'Emerging Market Stocks',
         'Commodities': 'Commodities',
         'Gold': 'Gold'
     }
+    
+    # Handle case where latest_date is NaT (no valid dates)
+    if pd.isna(latest_date):
+        date_str = "Latest Available"
+        latest_allocation = df.iloc[-len(df.groupby('asset_name')):]  # Get last entry for each asset
+    else:
+        date_str = latest_date.strftime("%B %Y")
+        latest_allocation = df[df['date'] == latest_date]
     
     # Apply name mapping
     latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
@@ -846,7 +862,7 @@ def create_allocation_pie_chart(data):
         latest_allocation,
         values='allocation_percentage',
         names='display_name',
-        title=f'Current Asset Allocation (as of {latest_date.strftime("%B %Y")})',
+        title=f'Current Asset Allocation (as of {date_str})',
         color_discrete_sequence=px.colors.qualitative.Set3
     )
     
@@ -1077,6 +1093,21 @@ def create_fact_sheet_landing(data, ga_metrics):
         # Get Global 60/40 metrics from database
         global_6040 = benchmark_data[benchmark_data['portfolio'] == '60/40'].iloc[0] if not benchmark_data.empty else None
         
+        # Calculate 3-year return for 60/40 from monthly returns data
+        monthly_returns_df = data['monthly_returns']
+        df = monthly_returns_df.copy()
+        df['date'] = pd.to_datetime(df['date'])
+        current_date = df['date'].max()
+        three_years_ago = current_date - timedelta(days=3*365.25)
+        three_year_data = df[df['date'] >= three_years_ago]
+        
+        if len(three_year_data) >= 24:  # Ensure we have at least 2 years of data
+            three_year_total_return_6040 = (1 + three_year_data['portfolio_60_40']).prod() - 1
+            years = len(three_year_data) / 12
+            three_year_annualized_6040 = (1 + three_year_total_return_6040) ** (1/years) - 1 if years > 0 else 0
+        else:
+            three_year_annualized_6040 = 0.0
+        
         performance_data = {
             '': ['RQA Global Adaptive', 'Global 60/40'],
             'YTD': [f"{ga_metrics['ytd']*100:.1f}%", 
@@ -1084,7 +1115,7 @@ def create_fact_sheet_landing(data, ga_metrics):
             '1 Year': [f"{ga_metrics['one_year']*100:.1f}%", 
                       f"{global_6040['one_year']*100:.1f}%" if global_6040 is not None else "N/A"],
             '3 Year': [f"{ga_metrics['three_year']*100:.1f}%", 
-                      f"{global_6040['five_year']*100:.1f}%" if global_6040 is not None else "N/A"],  # Using 5-year as proxy for 3-year
+                      f"{three_year_annualized_6040*100:.1f}%"],  # Now using calculated 3-year return
             '5 Year': [f"{ga_metrics['five_year']*100:.1f}%", 
                       f"{global_6040['five_year']*100:.1f}%" if global_6040 is not None else "N/A"],
             'Since Inception': [f"{ga_metrics['since_inception']*100:.1f}%", 
@@ -1203,67 +1234,77 @@ def create_fact_sheet_landing(data, ga_metrics):
         
         # Get current allocation data
         df = data['gam_allocations'].copy()
-        df['date'] = pd.to_datetime(df['date'])
-        latest_date = df['date'].max()
-        latest_allocation = df[df['date'] == latest_date][['asset_name', 'allocation_percentage']].copy()
-        latest_allocation = latest_allocation.sort_values('allocation_percentage', ascending=False)
         
-        # Create better allocation display with proper formatting and asset renaming
-        asset_name_map = {
-            'SP500': 'S&P 500',
-            'US_REITs': 'U.S. REITs', 
-            'US_LT_Treas': 'U.S. LT Treas',
-            'Intl_Dev_Stocks': 'Intl. Dev. Stocks',
-            'EM_Stocks': 'EM Stocks',
-            'Commodities': 'Commodities',
-            'Gold': 'Gold',
-            'Cash': 'Cash',
-            # Full ETF name mappings
-            'SPDR Portfolio S&P 500 ETF': 'S&P 500',
-            'iShares Gold Trust': 'Gold',
-            'Vanguard FTSE Developed Markets ETF': 'Intl. Dev. Stocks',
-            'Vanguard Real Estate Index Fund': 'U.S. REITs',
-            'Schwab Emerging Markets Equity ETF': 'EM Stocks',
-            'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
-            'iShares 20+ Year Treasury Bond ETF': 'U.S. LT Treas',
-            # Additional possible variants
-            'iShares Core MSCI Total International Stock ETF': 'Intl. Dev. Stocks',
-            'Vanguard Real Estate Index Fund ETF Shares': 'U.S. REITs',
-            'Schwab Fundamental Emerging Markets Large Company Index Fund': 'EM Stocks',
-            'Invesco DB Commodity Index Tracking Fund': 'Commodities'
-        }
-        
-        for _, row in latest_allocation.iterrows():
-            asset_name = row['asset_name']
-            # Map to display name - check for exact match first, then partial matches
-            display_name = asset_name_map.get(asset_name, asset_name)
-            if display_name == asset_name:  # No exact match found, try partial matching
-                for key, value in asset_name_map.items():
-                    if key.lower() in asset_name.lower() or asset_name.lower() in key.lower():
-                        display_name = value
-                        break
+        if df.empty:
+            st.markdown("*No allocation data available*")
+        else:
+            df['date'] = pd.to_datetime(df['date'])
+            latest_date = df['date'].max()
             
-            allocation = row['allocation_percentage']
-            
-            # Show more decimal places for small allocations (like cash)
-            if allocation < 1.0:
-                allocation_str = f"{allocation:.2f}%"
+            # Handle case where latest_date is NaT (no valid dates)
+            if pd.isna(latest_date):
+                latest_allocation = df.iloc[-len(df.groupby('asset_name')):][['asset_name', 'allocation_percentage']].copy()
             else:
-                allocation_str = f"{allocation:.1f}%"
+                latest_allocation = df[df['date'] == latest_date][['asset_name', 'allocation_percentage']].copy()
+                
+            latest_allocation = latest_allocation.sort_values('allocation_percentage', ascending=False)
             
-            # Enhanced allocation display with progress bars
-            bar_width = int(allocation * 2)  # Scale for visual effect
-            st.markdown(f"""
-            <div style="margin-bottom: 1rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
-                    <span style="font-weight: bold; color: #1e3a8a; font-size: 1.1rem;">{display_name}</span>
-                    <span style="font-weight: bold; color: #3b5998; font-size: 1.1rem;">{allocation_str}</span>
+            # Create better allocation display with proper formatting and asset renaming
+            asset_name_map = {
+                'SP500': 'U.S. Stocks (S&P 500)',
+                'US_REITs': 'U.S. Real Estate (REITs)', 
+                'US_LT_Treas': 'U.S. Long Term Treasuries',
+                'Intl_Dev_Stocks': 'International Developed Stocks',
+                'EM_Stocks': 'Emerging Market Stocks',
+                'Commodities': 'Commodities',
+                'Gold': 'Gold',
+                'Cash': 'Cash',
+                # Full ETF name mappings
+                'SPDR Portfolio S&P 500 ETF': 'U.S. Stocks (S&P 500)',
+                'iShares Gold Trust': 'Gold',
+                'Vanguard FTSE Developed Markets ETF': 'International Developed Stocks',
+                'Vanguard Real Estate Index Fund': 'U.S. Real Estate (REITs)',
+                'Schwab Emerging Markets Equity ETF': 'Emerging Market Stocks',
+                'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
+                'iShares 20+ Year Treasury Bond ETF': 'U.S. Long Term Treasuries',
+                # Additional possible variants
+                'iShares Core MSCI Total International Stock ETF': 'International Developed Stocks',
+                'Vanguard Real Estate Index Fund ETF Shares': 'U.S. Real Estate (REITs)',
+                'Schwab Fundamental Emerging Markets Large Company Index Fund': 'Emerging Market Stocks',
+                'Invesco DB Commodity Index Tracking Fund': 'Commodities'
+            }
+            
+            for _, row in latest_allocation.iterrows():
+                asset_name = row['asset_name']
+                # Map to display name - check for exact match first, then partial matches
+                display_name = asset_name_map.get(asset_name, asset_name)
+                if display_name == asset_name:  # No exact match found, try partial matching
+                    for key, value in asset_name_map.items():
+                        if key.lower() in asset_name.lower() or asset_name.lower() in key.lower():
+                            display_name = value
+                            break
+                
+                allocation = row['allocation_percentage'] * 100  # Convert to percentage
+                
+                # Show more decimal places for small allocations (like cash)
+                if allocation < 1.0:
+                    allocation_str = f"{allocation:.2f}%"
+                else:
+                    allocation_str = f"{allocation:.1f}%"
+                
+                # Enhanced allocation display with progress bars
+                bar_width = int(allocation * 2)  # Scale for visual effect
+                st.markdown(f"""
+                <div style="margin-bottom: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+                        <span style="font-weight: bold; color: #1e3a8a; font-size: 1.1rem;">{display_name}</span>
+                        <span style="font-weight: bold; color: #3b5998; font-size: 1.1rem;">{allocation_str}</span>
+                    </div>
+                    <div style="width: 100%; height: 20px; background-color: #f0f0f0; border-radius: 10px; overflow: hidden;">
+                        <div style="width: {bar_width}%; height: 100%; background: linear-gradient(90deg, #3b5998, #60a5fa); transition: width 0.3s ease;"></div>
+                    </div>
                 </div>
-                <div style="width: 100%; height: 20px; background-color: #f0f0f0; border-radius: 10px; overflow: hidden;">
-                    <div style="width: {bar_width}%; height: 100%; background: linear-gradient(90deg, #3b5998, #60a5fa); transition: width 0.3s ease;"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
     
     # Add disclaimer with enhanced styling
     st.markdown("""
@@ -1327,40 +1368,50 @@ def create_analytics_dashboard(data, ga_metrics):
         with col2:
             # Show allocation table using current GAM data with abbreviated names
             df = data['gam_allocations'].copy()
-            df['date'] = pd.to_datetime(df['date'])
-            latest_date = df['date'].max()
-            latest_allocation = df[df['date'] == latest_date][['asset_name', 'allocation_percentage']].copy()
             
-            # Create asset name mapping for cleaner display
-            asset_name_map = {
-                'SPDR Portfolio S&P 500 ETF': 'S&P 500',
-                'iShares Gold Trust': 'Gold',
-                'Vanguard FTSE Developed Markets ETF': 'Intl. Dev. Stocks',
-                'Vanguard Real Estate Index Fund': 'U.S. REITs',
-                'Schwab Emerging Markets Equity ETF': 'EM Stocks',
-                'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
-                'iShares 20+ Year Treasury Bond ETF': 'U.S. LT Treas',
-                'Cash': 'Cash',
-                'SP500': 'S&P 500',
-                'US_REITs': 'U.S. REITs', 
-                'US_LT_Treas': 'U.S. LT Treas',
-                'Intl_Dev_Stocks': 'Intl. Dev. Stocks',
-                'EM_Stocks': 'EM Stocks',
-                'Commodities': 'Commodities',
-                'Gold': 'Gold'
-            }
-            
-            # Apply name mapping
-            latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
-            
-            # Create final dataframe with abbreviated names
-            display_allocation = latest_allocation[['display_name', 'allocation_percentage']].copy()
-            display_allocation = display_allocation.sort_values('allocation_percentage', ascending=False)
-            display_allocation.columns = ['Asset Class', 'Allocation (%)']
-            display_allocation['Allocation (%)'] = display_allocation['Allocation (%)'].round(2)
-            
-            st.markdown("### Current Allocation Breakdown")
-            st.dataframe(display_allocation, width='stretch', hide_index=True)
+            if df.empty:
+                st.markdown("### Current Allocation Breakdown")
+                st.markdown("*No allocation data available*")
+            else:
+                df['date'] = pd.to_datetime(df['date'])
+                latest_date = df['date'].max()
+                
+                # Handle case where latest_date is NaT (no valid dates)
+                if pd.isna(latest_date):
+                    latest_allocation = df.iloc[-len(df.groupby('asset_name')):][['asset_name', 'allocation_percentage']].copy()
+                else:
+                    latest_allocation = df[df['date'] == latest_date][['asset_name', 'allocation_percentage']].copy()
+                
+                # Create asset name mapping for cleaner display
+                asset_name_map = {
+                    'SPDR Portfolio S&P 500 ETF': 'U.S. Stocks (S&P 500)',
+                    'iShares Gold Trust': 'Gold',
+                    'Vanguard FTSE Developed Markets ETF': 'International Developed Stocks',
+                    'Vanguard Real Estate Index Fund': 'U.S. Real Estate (REITs)',
+                    'Schwab Emerging Markets Equity ETF': 'Emerging Market Stocks',
+                    'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
+                    'iShares 20+ Year Treasury Bond ETF': 'U.S. Long Term Treasuries',
+                    'Cash': 'Cash',
+                    'SP500': 'U.S. Stocks (S&P 500)',
+                    'US_REITs': 'U.S. Real Estate (REITs)', 
+                    'US_LT_Treas': 'U.S. Long Term Treasuries',
+                    'Intl_Dev_Stocks': 'International Developed Stocks',
+                    'EM_Stocks': 'Emerging Market Stocks',
+                    'Commodities': 'Commodities',
+                    'Gold': 'Gold'
+                }
+                
+                # Apply name mapping
+                latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
+                
+                # Create final dataframe with abbreviated names
+                display_allocation = latest_allocation[['display_name', 'allocation_percentage']].copy()
+                display_allocation = display_allocation.sort_values('allocation_percentage', ascending=False)
+                display_allocation.columns = ['Asset Class', 'Allocation (%)']
+                display_allocation['Allocation (%)'] = (display_allocation['Allocation (%)'] * 100).round(2)  # Convert to percentage
+                
+                st.markdown("### Current Allocation Breakdown")
+                st.dataframe(display_allocation, width='stretch', hide_index=True)
     
     with tab2:
         st.markdown("""
