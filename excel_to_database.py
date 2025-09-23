@@ -126,22 +126,16 @@ def read_excel_data():
         
         # Convert percentage values to decimal (divide by 100) for consistency
         acwi = safe_float_convert(ws.cell(row=row, column=4).value)
-        acwi = acwi / 100 if acwi is not None else None
         
         agg = safe_float_convert(ws.cell(row=row, column=5).value)
-        agg = agg / 100 if agg is not None else None
         
         spy = safe_float_convert(ws.cell(row=row, column=6).value)
-        spy = spy / 100 if spy is not None else None
         
         port_50_50 = safe_float_convert(ws.cell(row=row, column=7).value)
-        port_50_50 = port_50_50 / 100 if port_50_50 is not None else None
         
         port_60_40 = safe_float_convert(ws.cell(row=row, column=8).value)
-        port_60_40 = port_60_40 / 100 if port_60_40 is not None else None
         
         port_70_30 = safe_float_convert(ws.cell(row=row, column=9).value)
-        port_70_30 = port_70_30 / 100 if port_70_30 is not None else None
         
         monthly_returns_data.append({
             'date': date_str,
