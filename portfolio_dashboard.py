@@ -697,9 +697,12 @@ def create_attribution_chart(data):
     other_columns = [col for col in pivot_df.columns if col not in column_order]
     final_columns = available_columns + other_columns
     
-    # Create ordered month list
-    month_order = ['Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul']
-    ordered_months = [month for month in month_order if month in pivot_df.index]
+    # Get the actual dates and sort them, then extract month abbreviations
+    df_sorted = df.groupby('month_end')['month_year'].first().reset_index()
+    df_sorted = df_sorted.sort_values('month_end')
+    ordered_months = df_sorted['month_year'].tolist()
+    
+    # Reindex pivot_df with the properly sorted months
     pivot_df = pivot_df.reindex(ordered_months)
     
     for asset in final_columns:
