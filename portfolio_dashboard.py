@@ -241,9 +241,13 @@ def create_growth_chart(data):
         hovertemplate='Date: %{x}<br>Value: $%{y:,.0f}<extra></extra>'
     ))
     
+    # Create dynamic date range for title
+    start_date = df['date'].min().strftime('%m/%d/%Y')
+    end_date = df['date'].max().strftime('%m/%d/%Y')
+    
     fig.update_layout(
         title={
-            'text': 'GROWTH OF $100,000<br><sub>(7/1/2019 - 9/18/2025)</sub>',
+            'text': f'GROWTH OF $100,000<br><sub>({start_date} - {end_date})</sub>',
             'x': 0.5,
             'xanchor': 'center',
             'font': {'size': 18, 'color': '#0f1419'}
