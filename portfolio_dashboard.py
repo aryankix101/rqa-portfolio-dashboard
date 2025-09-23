@@ -43,6 +43,90 @@ def debug_environment():
     
     st.write("---")
 
+def debug_data_sources(data):
+    """Debug function to analyze current data sources"""
+    st.write("## 🔍 Data Source Debug Analysis")
+    
+    # Show which database is being used
+    db_url = get_db_connection()
+    if db_url and POSTGRES_AVAILABLE:
+        st.write("**🟢 DATA SOURCE: PostgreSQL (Supabase)**")
+        database_type = "PostgreSQL"
+    else:
+        st.write("**🟡 DATA SOURCE: SQLite (Local)**")
+        database_type = "SQLite"
+    
+    # Environment info
+    cloud_deployment = hasattr(st, 'secrets') and len(st.secrets) > 0
+    st.write(f"**Streamlit Cloud Deployment:** {cloud_deployment}")
+    st.write(f"**PostgreSQL packages available:** {POSTGRES_AVAILABLE}")
+    
+    # Analyze allocation data
+    st.write("### Current Allocation Analysis")
+    allocation_df = data['gam_allocations'].copy()
+    
+    if allocation_df.empty:
+        st.error("❌ No allocation data found!")
+        return
+    
+    # Convert dates and analyze
+    allocation_df['date'] = pd.to_datetime(allocation_df['date'])
+    
+    st.write(f"**Number of allocation records:** {len(allocation_df)}")
+    st.write(f"**Date range:** {allocation_df['date'].min()} to {allocation_df['date'].max()}")
+    st.write(f"**Latest allocation date:** {allocation_df['date'].max()}")
+    
+    # Show current allocation details
+    latest_date = allocation_df['date'].max()
+    current_data = allocation_df[allocation_df['date'] == latest_date].copy()
+    current_data = current_data.sort_values('allocation_percentage', ascending=False)
+    
+    st.write("**Current allocation breakdown:**")
+    for _, row in current_data.iterrows():
+        st.write(f"  • {row['asset_name']}: {row['allocation_percentage']*100:.2f}%")
+    
+    # Show raw data table
+    st.write("**Raw current allocation data:**")
+    st.dataframe(current_data[['date', 'asset_name', 'asset_symbol', 'allocation_percentage']], use_container_width=True)
+    
+    # Monthly returns analysis
+    st.write("### Monthly Returns Analysis")
+    returns_df = data['monthly_returns'].copy()
+    
+    if not returns_df.empty:
+        returns_df['date'] = pd.to_datetime(returns_df['date'])
+        st.write(f"**Monthly returns records:** {len(returns_df)}")
+        st.write(f"**Returns date range:** {returns_df['date'].min()} to {returns_df['date'].max()}")
+        st.write(f"**Latest return date:** {returns_df['date'].max()}")
+    else:
+        st.error("❌ No monthly returns data found!")
+    
+    # Benchmark performance analysis
+    st.write("### Benchmark Performance Analysis")
+    benchmark_df = data['benchmark_performance'].copy()
+    
+    if not benchmark_df.empty:
+        st.write(f"**Benchmark records:** {len(benchmark_df)}")
+        st.write("**Available portfolios:**")
+        for portfolio in benchmark_df['portfolio'].unique():
+            st.write(f"  • {portfolio}")
+    else:
+        st.error("❌ No benchmark performance data found!")
+    
+    # Check for date consistency
+    st.write("### Date Consistency Check")
+    if not allocation_df.empty and not returns_df.empty:
+        alloc_max = allocation_df['date'].max()
+        returns_max = returns_df['date'].max()
+        
+        if alloc_max == returns_max:
+            st.success(f"✅ Allocation and returns dates match: {alloc_max}")
+        else:
+            st.warning(f"⚠️ Date mismatch - Allocation: {alloc_max}, Returns: {returns_max}")
+    
+    st.write("---")
+    st.write(f"**Analysis complete using {database_type} database**")
+
 # Configure Streamlit page
 st.set_page_config(
     page_title="Strategy Fact Sheet",
@@ -1033,6 +1117,10 @@ def main():
     # Add logo to sidebar above navigation
     st.sidebar.image("logo.png", width=200)
     st.sidebar.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
+    
+    # Debug button
+    if st.sidebar.button("🔍 Debug Data Sources"):
+        debug_data_sources(data)
     
     # Main navigation choice
     view_option = st.sidebar.selectbox(
