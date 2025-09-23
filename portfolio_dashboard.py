@@ -227,21 +227,19 @@ def create_growth_chart(data):
         y=df['ga_cumulative'],
         mode='lines',
         name='RQA Global Adaptive',
-        line=dict(color='#0f1419', width=3),
+        line=dict(color='#1e3a8a', width=3),  # Dark blue
         hovertemplate='Date: %{x}<br>Value: $%{y:,.0f}<extra></extra>'
     ))
-    
+
     # Add Global 60/40 benchmark
     fig.add_trace(go.Scatter(
         x=df['date'],
         y=df['benchmark_60_40'],
         mode='lines',
         name='Global 60/40',
-        line=dict(color='#16a085', width=2),
+        line=dict(color='#6b7280', width=2),  # Grey
         hovertemplate='Date: %{x}<br>Value: $%{y:,.0f}<extra></extra>'
-    ))
-    
-    # Create dynamic date range for title
+    ))    # Create dynamic date range for title
     start_date = df['date'].min().strftime('%m/%d/%Y')
     end_date = df['date'].max().strftime('%m/%d/%Y')
     
