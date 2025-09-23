@@ -1286,6 +1286,35 @@ def create_fact_sheet_landing(data, ga_metrics):
                 </div>
                 """, unsafe_allow_html=True)
     
+        # Key Strategy Features (standard header, icon bullets, no box outline)
+        st.markdown("""
+        <div style="background: #3b5998; color: white; padding: 0.9rem 1.4rem; border-radius: 8px; margin: 0.5rem 0 0.4rem 0;">
+            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
+        </div>
+        <ul style="list-style:none; padding:0; margin:0 0 0.5rem 0;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                <span style="line-height:1.15;">Tactical Asset Allocation</span>
+            </li>
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                <span style="line-height:1.15;">Global Diversification</span>
+            </li>
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                <span style="line-height:1.15;">Systematic Risk Management</span>
+            </li>
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                <span style="line-height:1.15;">Daily Liquidity</span>
+            </li>
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem; color:#1f2937;">
+                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                <span style="line-height:1.15;">Monthly Rebalancing</span>
+            </li>
+        </ul>
+        """, unsafe_allow_html=True)
+
     # Add disclaimer with enhanced styling
     st.markdown("""
     <div style="margin-top: 2rem; 
