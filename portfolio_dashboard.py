@@ -141,6 +141,19 @@ def load_data():
     # Check if we have a database connection string (indicates cloud deployment)
     db_url = get_db_connection()
     
+    # Add database type to cache key to prevent cross-contamination
+    if db_url and POSTGRES_AVAILABLE:
+        cache_key = f"postgres_{hash(db_url) % 10000}"
+    else:
+        cache_key = "sqlite_local"
+    
+    # Force cache invalidation if database type changes
+    if 'last_db_type' not in st.session_state:
+        st.session_state.last_db_type = cache_key
+    elif st.session_state.last_db_type != cache_key:
+        st.cache_data.clear()
+        st.session_state.last_db_type = cache_key
+    
     if db_url and POSTGRES_AVAILABLE:
         try:
             return load_data_postgres()
@@ -297,25 +310,6 @@ def create_empty_data_structure():
         'benchmark_performance': empty_df,
         'trailing_12m_allocations': empty_df,
         'trailing_12m_attribution': empty_df
-    }
-    
-    # Use historical data for trailing 12 months view (completed months only)
-    trailing_12m_allocations = historical_allocations.copy()
-    trailing_12m_attribution = historical_attribution.copy()
-    
-    conn.close()
-    
-    # Convert date columns
-    for df in [monthly_returns, current_gam_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
-        df['date'] = pd.to_datetime(df['date'])
-    
-    return {
-        'monthly_returns': monthly_returns,
-        'gam_allocations': current_gam_allocations,
-        'gam_attribution': historical_attribution,
-        'benchmark_performance': benchmark_performance,
-        'trailing_12m_allocations': trailing_12m_allocations,
-        'trailing_12m_attribution': trailing_12m_attribution
     }
 
 def create_growth_chart(data):
@@ -1121,6 +1115,12 @@ def main():
     # Debug button
     if st.sidebar.button("🔍 Debug Data Sources"):
         debug_data_sources(data)
+    
+    # Cache clearing button
+    if st.sidebar.button("🗑️ Clear Cache & Reload"):
+        st.cache_data.clear()
+        st.success("✅ Cache cleared! Reloading...")
+        st.rerun()
     
     # Main navigation choice
     view_option = st.sidebar.selectbox(
