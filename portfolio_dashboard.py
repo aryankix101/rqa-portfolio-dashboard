@@ -698,11 +698,15 @@ def create_attribution_chart(data):
     final_columns = available_columns + other_columns
     
     # Get the actual dates and sort them, then extract month abbreviations
+    # For trailing 12 months, we want the most recent 12 months in chronological order
     df_sorted = df.groupby('month_end')['month_year'].first().reset_index()
     df_sorted = df_sorted.sort_values('month_end')
-    ordered_months = df_sorted['month_year'].tolist()
     
-    # Reindex pivot_df with the properly sorted months
+    # Take only the last 12 months (or all available if less than 12)
+    last_12_months = df_sorted.tail(12)
+    ordered_months = last_12_months['month_year'].tolist()
+    
+    # Reindex pivot_df with the properly sorted months (last 12 months chronologically)
     pivot_df = pivot_df.reindex(ordered_months)
     
     for asset in final_columns:
