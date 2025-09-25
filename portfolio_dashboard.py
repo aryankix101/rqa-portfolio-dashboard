@@ -1904,13 +1904,15 @@ def create_analytics_dashboard(data, ga_metrics):
             st.markdown("### Top Contributors")
             top_contributors = attribution_summary.head(4)
             for asset, contrib in top_contributors.items():
-                st.metric(asset, f"{contrib:.2f}%")
+                display_name = asset_name_map.get(asset, asset)
+                st.metric(display_name, f"{contrib:.2f}%")
         
         with col2:
             st.markdown("### Detractors")
             detractors = attribution_summary.tail(4)
             for asset, contrib in detractors.items():
-                st.metric(asset, f"{contrib:.2f}%")
+                display_name = asset_name_map.get(asset, asset)
+                st.metric(display_name, f"{contrib:.2f}%")
     
 if __name__ == "__main__":
     main()
