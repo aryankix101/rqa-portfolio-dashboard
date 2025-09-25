@@ -7,6 +7,8 @@ import sqlite3
 import numpy as np
 from datetime import datetime, timedelta
 import os
+import base64
+from io import BytesIO
 
 # PostgreSQL imports with error handling
 try:
@@ -105,7 +107,7 @@ def load_data_postgres():
         # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", engine)
         
-        # Get most recent GAM allocations (for current allocation display)
+        # Get most recent GA allocations (for current allocation display)
         current_gam_allocations = pd.read_sql_query("""
             SELECT * FROM gam_allocations 
             WHERE date = (SELECT MAX(date) FROM gam_allocations)
@@ -157,7 +159,7 @@ def load_data_sqlite():
         # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", conn)
         
-        # Get most recent GAM allocations (for current allocation display)
+        # Get most recent GA allocations (for current allocation display)
         current_gam_allocations = pd.read_sql_query("""
             SELECT * FROM gam_allocations 
             WHERE date = (SELECT MAX(date) FROM gam_allocations)
@@ -298,7 +300,7 @@ def create_trailing_12m_allocations_chart(data):
         )
         return fig
     
-    # Filter for trailing 12 months from the last available month-end
+    # Filter for exactly trailing 12 months from the latest available month-end
     df['date'] = pd.to_datetime(df['date'])
     latest_date = df['date'].max()
     
@@ -307,12 +309,23 @@ def create_trailing_12m_allocations_chart(data):
         # If no valid dates, just use all available data
         pass
     else:
-        twelve_months_ago = latest_date - timedelta(days=365)
-        df = df[df['date'] >= twelve_months_ago]
+        # Get the latest month-year period
+        latest_period = pd.Period(latest_date, freq='M')
+        
+        # Calculate exactly 12 months back from the latest period
+        # For Sept 2025: Include Oct 2024, Nov 2024, ..., Aug 2025, Sep 2025 (12 months)
+        periods_to_include = [latest_period - i for i in range(11, -1, -1)]  # Reverse order for chronological
+        
+        # Filter data to only include these specific month-year periods
+        df['period'] = df['date'].dt.to_period('M')
+        df = df[df['period'].isin(periods_to_include)]
     
-    # Group by month-end dates to get one entry per month
-    df['month_end'] = df['date'].dt.to_period('M').dt.end_time
-    monthly_df = df.groupby(['month_end', 'asset_name'])['allocation_percentage'].last().reset_index()
+    # Group by period and asset to get one entry per month-year combination
+    monthly_df = df.groupby(['period', 'asset_name'])['allocation_percentage'].last().reset_index()
+    
+    # Convert period back to month_end for display and sort chronologically
+    monthly_df['month_end'] = monthly_df['period'].dt.end_time
+    monthly_df = monthly_df.sort_values('period')
     
     # Pivot data for stacked bar chart
     pivot_df = monthly_df.pivot(index='month_end', columns='asset_name', values='allocation_percentage')
@@ -329,16 +342,15 @@ def create_trailing_12m_allocations_chart(data):
     # Create stacked bar chart
     fig = go.Figure()
     
-    # Color palette for assets (matching the original charts)
     colors = {
-        'SP500': '#87CEEB',  # Light blue
-        'Gold': '#FFA500',   # Orange/Gold
-        'US_REITs': '#90EE90',  # Light green
-        'US_LT_Treas': '#4169E1',  # Royal blue
-        'Intl_Dev_Stocks': '#9370DB',  # Medium purple
-        'EM_Stocks': '#696969',  # Dim gray
-        'Commodities': '#2F4F4F',  # Dark slate gray
-        'Cash': '#D3D3D3'  # Light gray
+        'SP500': '#80c1ff',  
+        'Gold': '#4da6ff',   
+        'US_REITs': '#337fcc',  
+        'US_LT_Treas': '#1a5fb4', 
+        'Intl_Dev_Stocks': '#00509e', 
+        'EM_Stocks': '#004080', 
+        'Commodities': '#003366', 
+        'Cash': '#001f3f' 
     }
     
     # Sort columns to match the stacking order from the screenshots
@@ -437,7 +449,7 @@ def create_monthly_returns_chart(data):
     fig.update_layout(
         height=700,
         showlegend=False,
-        title_text="GAM Portfolio Performance Analysis"
+        title_text="GA Portfolio Performance Analysis"
     )
     
     return fig
@@ -446,13 +458,15 @@ def create_benchmark_performance_chart(data):
     """Create Benchmark Performance comparison with blue theme and professional styling"""
     df = data['benchmark_performance'].copy()
     
-    # Blue theme palette for grouped bars (dark to light)
-    blue_palette = ["#0B3C7D", "#1D5BBF", "#3C82F6", "#93B4FF"]  # YTD, 1Y, 5Y, SI
-    single_colors = {
-        'volatility': "#EF4444",  # Red
-        'sharpe': "#22C55E",      # Green
-        'beta': "#8B5CF6"         # Purple
+    # Portfolio-specific colors (consistent across all charts)
+    portfolio_colors = {
+        'GAM': "#1e3a8a",      # Dark blue for GAM
+        '60/40': "#15803d",    # Dark green for 60/40
+        '70/30': "#6b7280"     # Gray for 70/30
     }
+    
+    # Time period colors for the returns chart legend
+    time_period_colors = ["#0B3C7D", "#1D5BBF", "#3C82F6", "#93B4FF"]  # YTD, 1Y, 5Y, SI
     
     # Create 2x2 subplots with proper spacing
     fig = make_subplots(
@@ -466,10 +480,10 @@ def create_benchmark_performance_chart(data):
     
     # Returns comparison (grouped bars) - only these show in legend
     metrics_data = [
-        ('ytd', 'YTD', blue_palette[0]),
-        ('one_year', '1Y', blue_palette[1]),
-        ('five_year', '5Y', blue_palette[2]),
-        ('since_inception', 'Since Inception', blue_palette[3])
+        ('ytd', 'YTD', time_period_colors[0]),
+        ('one_year', '1Y', time_period_colors[1]),
+        ('five_year', '5Y', time_period_colors[2]),
+        ('since_inception', 'Since Inception', time_period_colors[3])
     ]
     
     for i, (metric, label, color) in enumerate(metrics_data):
@@ -489,51 +503,54 @@ def create_benchmark_performance_chart(data):
             row=1, col=1
         )
     
-    # Risk metrics (Standard Deviation) - single series
+    # Risk metrics (Standard Deviation) - portfolio-specific colors
     risk_values = df['standard_deviation'] * 100
+    portfolio_risk_colors = [portfolio_colors[portfolio] for portfolio in portfolios]
     fig.add_trace(
         go.Bar(
             x=portfolios,
             y=risk_values,
             name='Volatility',
-            marker_color=single_colors['volatility'],
+            marker_color=portfolio_risk_colors,
             text=[f'{v:.1f}%' for v in risk_values],
             textposition='outside',
-            textfont=dict(color=single_colors['volatility'], size=11),
+            textfont=dict(color='#374151', size=11),
             showlegend=False,
             hovertemplate="<b>%{x}</b><br>Volatility: %{y:.2f}%<extra></extra>"
         ),
         row=1, col=2
     )
     
-    # Sharpe Ratio - single series
+    # Sharpe Ratio - portfolio-specific colors
     sharpe_values = df['sharpe_ratio']
+    portfolio_sharpe_colors = [portfolio_colors[portfolio] for portfolio in portfolios]
     fig.add_trace(
         go.Bar(
             x=portfolios,
             y=sharpe_values,
             name='Sharpe',
-            marker_color=single_colors['sharpe'],
+            marker_color=portfolio_sharpe_colors,
             text=[f'{v:.2f}' for v in sharpe_values],
             textposition='outside',
-            textfont=dict(color=single_colors['sharpe'], size=11),
+            textfont=dict(color='#374151', size=11),
             showlegend=False,
             hovertemplate="<b>%{x}</b><br>Sharpe Ratio: %{y:.2f}<extra></extra>"
         ),
         row=2, col=1
     )
     
-    # Beta to S&P 500 - single series
+    # Beta to S&P 500 - portfolio-specific colors
     beta_values = df['beta_to_sp500']
+    portfolio_beta_colors = [portfolio_colors[portfolio] for portfolio in portfolios]
     fig.add_trace(
         go.Bar(
             x=portfolios,
             y=beta_values,
             name='Beta',
-            marker_color=single_colors['beta'],
+            marker_color=portfolio_beta_colors,
             text=[f'{v:.2f}' for v in beta_values],
             textposition='outside',
-            textfont=dict(color=single_colors['beta'], size=11),
+            textfont=dict(color='#374151', size=11),
             showlegend=False,
             hovertemplate="<b>%{x}</b><br>Beta: %{y:.2f}<extra></extra>"
         ),
@@ -567,14 +584,14 @@ def create_benchmark_performance_chart(data):
         bargap=0.18,
         bargroupgap=0.12,
         
-        # Uniform text settings to prevent overlap
-        uniformtext_minsize=10,
-        uniformtext_mode="hide"
+        # Uniform text settings - allow text to show
+        uniformtext_minsize=8,
+        uniformtext_mode="show"
     )
     
     # Update y-axes with fixed ranges, titles, and styling
     fig.update_yaxes(
-        range=[0, 16], 
+        range=[0, 18],  # Increased range to accommodate text labels above bars
         title_text="Returns (%)",
         tickformat=".1f",
         gridcolor="rgba(15,23,42,0.08)",
@@ -648,7 +665,7 @@ def create_attribution_chart(data):
         )
         return fig
     
-    # Filter for trailing 12 months
+    # Filter for trailing 12 months using precise month-year periods
     df['date'] = pd.to_datetime(df['date'])
     latest_date = df['date'].max()
     
@@ -657,14 +674,20 @@ def create_attribution_chart(data):
         # If no valid dates, just use all available data
         pass
     else:
-        twelve_months_ago = latest_date - timedelta(days=365)
-        df = df[df['date'] >= twelve_months_ago]
+        # Get the latest month-year period
+        latest_period = pd.Period(latest_date, freq='M')
+        
+        # Calculate exactly 12 months back from the latest period (including current month)
+        periods_to_include = [latest_period - i for i in range(12)]
+        
+        # Filter data to only include these specific month-year periods
+        df['period'] = df['date'].dt.to_period('M')
+        df = df[df['period'].isin(periods_to_include)]
     
-    # Create month-year labels for x-axis - use month-end grouping to avoid duplicates
-    df['month_end'] = df['date'].dt.to_period('M').dt.end_time
-    df['month_year'] = df['month_end'].dt.strftime('%b')
+    # Create month labels for x-axis using the period
+    df['month_year'] = df['period'].dt.strftime('%b')
     
-    # Pivot data for stacked bar chart - use month_end for proper grouping
+    # Group by period and asset to get one entry per month-year combination
     pivot_df = df.groupby(['month_year', 'asset_name'])['attribution_value'].sum().reset_index()
     pivot_df = pivot_df.pivot(index='month_year', columns='asset_name', values='attribution_value')
     pivot_df = pivot_df.fillna(0)
@@ -679,14 +702,14 @@ def create_attribution_chart(data):
     
     # Color palette for assets (matching the allocation chart)
     colors = {
-        'SP500': '#87CEEB',  # Light blue
-        'Gold': '#FFA500',   # Orange/Gold
-        'US_REITs': '#90EE90',  # Light green
-        'US_LT_Treas': '#4169E1',  # Royal blue
-        'Intl_Dev_Stocks': '#9370DB',  # Medium purple
-        'EM_Stocks': '#696969',  # Dim gray
-        'Commodities': '#2F4F4F',  # Dark slate gray
-        'Cash': '#D3D3D3'  # Light gray
+        'SP500': '#80c1ff',  
+        'Gold': '#4da6ff',   
+        'US_REITs': '#337fcc',  
+        'US_LT_Treas': '#1a5fb4', 
+        'Intl_Dev_Stocks': '#00509e', 
+        'EM_Stocks': '#004080', 
+        'Commodities': '#003366', 
+        'Cash': '#001f3f' 
     }
     
     # Order columns same as allocation chart
@@ -695,17 +718,20 @@ def create_attribution_chart(data):
     other_columns = [col for col in pivot_df.columns if col not in column_order]
     final_columns = available_columns + other_columns
     
-    # Get the actual dates and sort them, then extract month abbreviations
+    # Get the actual periods and sort them, then extract month abbreviations
     # For trailing 12 months, we want the most recent 12 months in chronological order
-    df_sorted = df.groupby('month_end')['month_year'].first().reset_index()
-    df_sorted = df_sorted.sort_values('month_end')
-    
-    # Take only the last 12 months (or all available if less than 12)
-    last_12_months = df_sorted.tail(12)
-    ordered_months = last_12_months['month_year'].tolist()
-    
-    # Reindex pivot_df with the properly sorted months (last 12 months chronologically)
-    pivot_df = pivot_df.reindex(ordered_months)
+    if not df.empty:
+        df_sorted = df.groupby('period')['month_year'].first().reset_index()
+        df_sorted = df_sorted.sort_values('period')
+        
+        # Take only the last 12 months (or all available if less than 12)
+        last_12_months = df_sorted.tail(12)
+        ordered_months = last_12_months['month_year'].tolist()
+        
+        # Reindex pivot_df with the properly sorted months (last 12 months chronologically)
+        pivot_df = pivot_df.reindex(ordered_months)
+    else:
+        ordered_months = list(pivot_df.index)
     
     for asset in final_columns:
         fig.add_trace(go.Bar(
@@ -838,12 +864,36 @@ def create_allocation_pie_chart(data):
     # Apply name mapping
     latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
     
+    # Custom blue color scheme for pie chart
+    colors = {
+        'SP500': '#80c1ff',  
+        'Gold': '#4da6ff',   
+        'US_REITs': '#337fcc',  
+        'US_LT_Treas': '#1a5fb4', 
+        'Intl_Dev_Stocks': '#00509e', 
+        'EM_Stocks': '#004080', 
+        'Commodities': '#003366', 
+        'Cash': '#001f3f',
+        # Map display names to colors as well
+        'U.S. Stocks (S&P 500)': '#80c1ff',
+        'Gold': '#4da6ff',
+        'U.S. Real Estate (REITs)': '#337fcc',
+        'U.S. Long Term Treasuries': '#1a5fb4',
+        'International Developed Stocks': '#00509e',
+        'Emerging Market Stocks': '#004080',
+        'Commodities': '#003366',
+        'Cash': '#001f3f'
+    }
+    
+    # Create color list based on display names in the data
+    pie_colors = [colors.get(name, '#1f77b4') for name in latest_allocation['display_name']]
+    
     fig = px.pie(
         latest_allocation,
         values='allocation_percentage',
         names='display_name',
         title=f'Current Asset Allocation (as of {date_str})',
-        color_discrete_sequence=px.colors.qualitative.Set3
+        color_discrete_sequence=pie_colors
     )
     
     fig.update_traces(
@@ -1026,9 +1076,273 @@ def main():
     else:
         create_analytics_dashboard(data, ga_metrics)
 
+def generate_pdf_report(data, ga_metrics):
+    """Generate PDF report of the strategy fact sheet"""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import inch
+        from reportlab.graphics.shapes import Drawing
+        from reportlab.graphics.charts.linecharts import HorizontalLineChart
+        import tempfile
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        
+        # Get styles
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=1,  # Center alignment
+            textColor=colors.HexColor('#1e3a8a')
+        )
+        
+        header_style = ParagraphStyle(
+            'CustomHeader',
+            parent=styles['Heading2'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=colors.HexColor('#3b5998'),
+            backColor=colors.HexColor('#f0f4f8'),
+            borderPadding=8
+        )
+        
+        story = []
+        
+        # Title
+        story.append(Paragraph("RQA Global Adaptive Strategy", title_style))
+        story.append(Paragraph(f"Fact Sheet - {datetime.now().strftime('%B %d, %Y')}", styles['Normal']))
+        story.append(Spacer(1, 20))
+        
+        # Strategy Overview
+        story.append(Paragraph("STRATEGY OVERVIEW", header_style))
+        overview_text = """
+        Global Adaptive (GA) is designed to meet the challenges of today's ever-changing markets by allocating 
+        capital across major global asset classes through a disciplined, data-driven process. Traditional approaches, 
+        such as the 60/40 stock-bond portfolio, rely on static assumptions that may leave investors overexposed when 
+        conditions shift. Instead, GA takes a dynamic approach. By continuously evaluating global opportunities, the 
+        strategy seeks to increase exposure to asset classes showing strength while reducing or avoiding those losing 
+        momentum. This adaptability allows the portfolio to respond proactively rather than reactively, providing the 
+        potential for stronger risk-adjusted returns over time.
+        """
+        story.append(Paragraph(overview_text, styles['Normal']))
+        story.append(Spacer(1, 15))
+        
+        # Performance Metrics
+        story.append(Paragraph("STRATEGY RETURNS (Net of Fees)", header_style))
+        
+        # Create performance table
+        perf_data = [
+            ['Period', 'RQA Global Adaptive', 'Global 60/40'],
+            ['YTD', f"{ga_metrics['ytd']*100:.2f}%", "N/A"],
+            ['1 Year', f"{ga_metrics['one_year']*100:.2f}%", "N/A"],
+            ['5 Year', f"{ga_metrics['five_year']*100:.2f}%", "N/A"],
+            ['Since Inception', f"{ga_metrics['since_inception']*100:.2f}%", "N/A"]
+        ]
+        
+        perf_table = Table(perf_data)
+        perf_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b5998')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        story.append(perf_table)
+        story.append(Spacer(1, 20))
+        
+        # Key Metrics
+        story.append(Paragraph("KEY METRICS", header_style))
+        metrics_data = [
+            ['Metric', 'Value'],
+            ['Sharpe Ratio', f"{ga_metrics.get('sharpe_ratio', 0):.2f}"],
+            ['Standard Deviation', f"{ga_metrics.get('standard_deviation', 0)*100:.1f}%"],
+            ['Beta to S&P 500', f"{ga_metrics.get('beta_to_sp500', 0):.2f}"]
+        ]
+        
+        metrics_table = Table(metrics_data)
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b5998')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.black)
+        ]))
+        
+        story.append(metrics_table)
+        story.append(Spacer(1, 20))
+        
+        # Key Strategy Features
+        story.append(Paragraph("KEY STRATEGY FEATURES", header_style))
+        features_text = """
+        • Dynamic Asset Allocation across global markets<br/>
+        • Quantitative risk management framework<br/>
+        • Tactical rebalancing based on market conditions<br/>
+        • Diversified exposure to multiple asset classes<br/>
+        • Active downside protection during market stress<br/>
+        • Evidence-based investment process
+        """
+        story.append(Paragraph(features_text, styles['Normal']))
+        
+        # Footer
+        story.append(Spacer(1, 30))
+        footer_text = f"Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')} | Richmond Quantitative Advisors"
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=8,
+            alignment=1,  # Center alignment
+            textColor=colors.grey
+        )
+        story.append(Paragraph(footer_text, footer_style))
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        return buffer.getvalue()
+        
+    except ImportError:
+        raise Exception("ReportLab library not installed. Please run: pip install reportlab")
+    except Exception as e:
+        raise Exception(f"Error generating PDF: {str(e)}")
+
 def create_fact_sheet_landing(data, ga_metrics):
-    # Page title
-    st.markdown("<h1 style='text-align: center; color: #0f1419; margin-bottom: 2rem;'>RQA Global Adaptive Strategy Fact Sheet</h1>", unsafe_allow_html=True)
+    # Clean Professional Header with Logo and Strategy Name
+    import base64
+    import os
+    
+    # Read and encode logo
+    logo_html = ""
+    if os.path.exists("logo.png"):
+        with open("logo.png", "rb") as f:
+            logo_data = base64.b64encode(f.read()).decode()
+            logo_html = f'<img src="data:image/png;base64,{logo_data}" style="width: auto; height: 100px; border-radius: 12px; background: white; padding: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);"/>'
+    
+    # Create the professional header with logo on left and strategy name on right
+    
+    # Read and encode globe image for background
+    globe_bg = ""
+    if os.path.exists("globe.png"):
+        with open("globe.png", "rb") as f:
+            globe_data = base64.b64encode(f.read()).decode()
+            globe_bg = f"url('data:image/png;base64,{globe_data}')"
+    
+    st.markdown(f"""
+    <div style="
+        background: 
+            linear-gradient(135deg, rgba(37, 99, 235, 0.75) 0%, rgba(59, 130, 246, 0.75) 50%, rgba(96, 165, 250, 0.75) 100%),
+            {globe_bg};
+        background-size: cover, contain;
+        background-position: center, center;
+        background-repeat: no-repeat;
+        color: white;
+        padding: 3rem 4rem;
+        margin: -1rem -1rem 3rem -1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        min-height: 140px;
+        position: relative;
+    ">
+        <div style="flex-shrink: 0;">
+            {logo_html}
+        </div>
+        <div style="text-align: center; flex: 1; margin-left: 2rem;">
+            <h1 style="
+                margin: 0;
+                font-size: 4rem;
+                font-weight: 300;
+                letter-spacing: 0.2rem;
+                color: white;
+                line-height: 1.1;
+                text-shadow: 0 3px 6px rgba(0,0,0,0.4);
+            ">GLOBAL</h1>
+            <h1 style="
+                margin: -0.2rem 0 0.3rem 0;
+                font-size: 4rem;
+                font-weight: 300;
+                letter-spacing: 0.2rem;
+                color: white;
+                line-height: 1.1;
+                text-shadow: 0 3px 6px rgba(0,0,0,0.4);
+            ">ADAPTIVE</h1>
+            <div style="width: 80%; height: 2px; background: white; margin: 1rem auto;"></div>
+            <h2 style="
+                margin: 0;
+                font-size: 2.5rem;
+                font-weight: 300;
+                letter-spacing: 0.3rem;
+                color: white;
+                text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            ">STRATEGY</h2>
+        </div>
+        <div style="flex-shrink: 0; width: 120px;"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Professional PDF Export Icon - positioned above everything in top right
+    try:
+        pdf_buffer = generate_pdf_report(data, ga_metrics)
+        
+        # Create download link with professional icon
+        b64_pdf = base64.b64encode(pdf_buffer).decode()
+        filename = f"RQA_Global_Adaptive_Strategy_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
+        
+        st.markdown(f"""
+        <div style="
+            position: fixed; 
+            top: 15px; 
+            right: 25px; 
+            z-index: 9999;
+            background: transparent;
+        ">
+            <a href="data:application/pdf;base64,{b64_pdf}" 
+               download="{filename}"
+               style="text-decoration: none;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" 
+                     style="cursor: pointer; opacity: 0.7; transition: opacity 0.2s;"
+                     onmouseover="this.style.opacity='1'"
+                     onmouseout="this.style.opacity='0.7'">
+                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z" 
+                          fill="#1e3a8a"/>
+                    <path d="M14 2V8H20" fill="#60a5fa"/>
+                    <path d="M12 18L8 14H10.5V10H13.5V14H16L12 18Z" fill="white"/>
+                </svg>
+            </a>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    except Exception as e:
+        # Fallback if PDF generation fails
+        st.markdown(f"""
+        <div style="
+            position: fixed; 
+            top: 15px; 
+            right: 25px; 
+            z-index: 9999;
+        ">
+            <div title="PDF Export Error: {str(e)}" style="opacity: 0.3;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="#cccccc">
+                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z"/>
+                    <path d="M14 2V8H20" fill="#e0e0e0"/>
+                    <path d="M12 18L8 14H10.5V10H13.5V14H16L12 18Z" fill="white"/>
+                </svg>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Main content layout
     col1, col2 = st.columns([2, 1])
@@ -1315,6 +1629,19 @@ def create_fact_sheet_landing(data, ga_metrics):
         </ul>
         """, unsafe_allow_html=True)
 
+        # Download factsheet button only
+        pdf_buffer = generate_pdf_report(data, ga_metrics)
+        
+        st.download_button(
+            label="📄 Download Factsheet",
+            data=pdf_buffer,
+            file_name="RQA_Strategy_Factsheet.pdf",
+            mime="application/pdf",
+            key="factsheet_download",
+            help="Click to download the strategy factsheet PDF",
+            use_container_width=True
+        )
+
     # Add disclaimer with enhanced styling
     st.markdown("""
     <div style="margin-top: 2rem; 
@@ -1331,13 +1658,69 @@ def create_fact_sheet_landing(data, ga_metrics):
     """, unsafe_allow_html=True)
 
 def create_analytics_dashboard(data, ga_metrics):
-    # Centered page title with better styling
-    st.markdown("""
-    <h1 style="text-align: center; 
-               color: #0f1419; 
-               margin-bottom: 2rem;
-               font-size: 2.5rem;
-               font-weight: bold;">RQA Portfolio Analytics Dashboard</h1>
+    # Clean Professional Header with Logo and Analytics Name
+    import base64
+    import os
+    
+    # Read and encode logo
+    logo_html = ""
+    if os.path.exists("logo.png"):
+        with open("logo.png", "rb") as f:
+            logo_data = base64.b64encode(f.read()).decode()
+            logo_html = f'<img src="data:image/png;base64,{logo_data}" style="width: auto; height: 100px; border-radius: 12px; background: white; padding: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);"/>'
+    
+    # Create the professional header with logo on left and analytics name on right
+    
+    # Read and encode globe image for background
+    globe_bg = ""
+    if os.path.exists("globe.png"):
+        with open("globe.png", "rb") as f:
+            globe_data = base64.b64encode(f.read()).decode()
+            globe_bg = f"url('data:image/png;base64,{globe_data}')"
+    
+    st.markdown(f"""
+    <div style="
+        background: 
+            linear-gradient(135deg, rgba(37, 99, 235, 0.75) 0%, rgba(59, 130, 246, 0.75) 50%, rgba(96, 165, 250, 0.75) 100%),
+            {globe_bg};
+        background-size: cover, contain;
+        background-position: center, center;
+        background-repeat: no-repeat;
+        color: white;
+        padding: 3rem 4rem;
+        margin: -1rem -1rem 3rem -1rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+        min-height: 140px;
+        position: relative;
+    ">
+        <div style="flex-shrink: 0;">
+            {logo_html}
+        </div>
+        <div style="text-align: center; flex: 1; margin-left: 2rem;">
+            <h1 style="
+                margin: 0;
+                font-size: 4rem;
+                font-weight: 300;
+                letter-spacing: 0.2rem;
+                color: white;
+                line-height: 1.1;
+                text-shadow: 0 3px 6px rgba(0,0,0,0.4);
+            "            ">PORTFOLIO</h1>
+            <div style="width: 80%; height: 2px; background: white; margin: 1rem auto;"></div>
+            <h2 style=""
+                    margin: 0;
+                    font-size: 2.5rem;
+                    font-weight: 300;
+                    letter-spacing: 0.3rem;
+                    color: white;
+                    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                ">ANALYTICS</h2>
+        </div>
+        <div style="flex-shrink: 0; width: 120px;"></div>
+    </div>
     """, unsafe_allow_html=True)
     
     # Sidebar metrics
@@ -1372,7 +1755,7 @@ def create_analytics_dashboard(data, ga_metrics):
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.plotly_chart(create_allocation_pie_chart(data), width='stretch')
+            st.plotly_chart(create_allocation_pie_chart(data), use_container_width=True)
         
         with col2:
             # Show allocation table using current GAM data with abbreviated names
@@ -1432,7 +1815,7 @@ def create_analytics_dashboard(data, ga_metrics):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">TRAILING 12 MONTH ALLOCATIONS</h2>
         </div>
         """, unsafe_allow_html=True)
-        st.plotly_chart(create_trailing_12m_allocations_chart(data), width='stretch')
+        st.plotly_chart(create_trailing_12m_allocations_chart(data), use_container_width=True)
         
         st.markdown("**Analysis:** This stacked bar chart shows how the portfolio allocation has evolved over the trailing 12 months. You can see the dynamic rebalancing across different asset classes.")
     
@@ -1446,7 +1829,7 @@ def create_analytics_dashboard(data, ga_metrics):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">MONTHLY RETURNS & VOLATILITY</h2>
         </div>
         """, unsafe_allow_html=True)
-        st.plotly_chart(create_monthly_returns_chart(data), width='stretch')
+        st.plotly_chart(create_monthly_returns_chart(data), use_container_width=True)
         
         # Summary statistics
         returns_data = data['monthly_returns']
@@ -1471,7 +1854,7 @@ def create_analytics_dashboard(data, ga_metrics):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">BENCHMARK PERFORMANCE COMPARISON</h2>
         </div>
         """, unsafe_allow_html=True)
-        st.plotly_chart(create_benchmark_performance_chart(data), width='stretch')
+        st.plotly_chart(create_benchmark_performance_chart(data), use_container_width=True)
         
         
     
@@ -1485,7 +1868,7 @@ def create_analytics_dashboard(data, ga_metrics):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">PORTFOLIO ATTRIBUTION ANALYSIS</h2>
         </div>
         """, unsafe_allow_html=True)
-        st.plotly_chart(create_attribution_chart(data), width='stretch')
+        st.plotly_chart(create_attribution_chart(data), use_container_width=True)
         
         # Attribution summary
         attribution_data = data['trailing_12m_attribution']
@@ -1510,9 +1893,5 @@ def create_analytics_dashboard(data, ga_metrics):
             for asset, contrib in detractors.items():
                 st.metric(asset, f"{contrib:.2f}%")
     
-    # Footer
-    st.markdown("---")
-    st.markdown("**Data Source:** GAM Portfolio Analytics Database | **Last Updated:** September 2025")
-
 if __name__ == "__main__":
     main()
