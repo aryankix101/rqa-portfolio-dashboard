@@ -478,6 +478,9 @@ def create_benchmark_performance_chart(data):
     
     portfolios = df['portfolio'].tolist()
     
+    # Map portfolio names for display (GAM -> GA)
+    portfolio_display_names = ['GA' if p == 'GAM' else p for p in portfolios]
+    
     # Returns comparison (grouped bars) - only these show in legend
     metrics_data = [
         ('ytd', 'YTD', time_period_colors[0]),
@@ -490,7 +493,7 @@ def create_benchmark_performance_chart(data):
         values = df[metric] * 100
         fig.add_trace(
             go.Bar(
-                x=portfolios,
+                x=portfolio_display_names,
                 y=values,
                 name=label,
                 marker_color=color,
@@ -508,7 +511,7 @@ def create_benchmark_performance_chart(data):
     portfolio_risk_colors = [portfolio_colors[portfolio] for portfolio in portfolios]
     fig.add_trace(
         go.Bar(
-            x=portfolios,
+            x=portfolio_display_names,
             y=risk_values,
             name='Volatility',
             marker_color=portfolio_risk_colors,
@@ -526,7 +529,7 @@ def create_benchmark_performance_chart(data):
     portfolio_sharpe_colors = [portfolio_colors[portfolio] for portfolio in portfolios]
     fig.add_trace(
         go.Bar(
-            x=portfolios,
+            x=portfolio_display_names,
             y=sharpe_values,
             name='Sharpe',
             marker_color=portfolio_sharpe_colors,
@@ -544,7 +547,7 @@ def create_benchmark_performance_chart(data):
     portfolio_beta_colors = [portfolio_colors[portfolio] for portfolio in portfolios]
     fig.add_trace(
         go.Bar(
-            x=portfolios,
+            x=portfolio_display_names,
             y=beta_values,
             name='Beta',
             marker_color=portfolio_beta_colors,
@@ -1136,13 +1139,29 @@ def generate_pdf_report(data, ga_metrics):
         # Performance Metrics
         story.append(Paragraph("STRATEGY RETURNS (Net of Fees)", header_style))
         
+        # Get benchmark data for 60/40 portfolio
+        benchmark_data = data.get('benchmark_performance', pd.DataFrame())
+        if not benchmark_data.empty:
+            # Find 60/40 portfolio data
+            sixtyforty_data = benchmark_data[benchmark_data['portfolio'] == '60/40']
+            if not sixtyforty_data.empty:
+                sixtyforty_metrics = sixtyforty_data.iloc[0]
+                sixtyforty_ytd = f"{sixtyforty_metrics.get('ytd', 0)*100:.2f}%"
+                sixtyforty_1y = f"{sixtyforty_metrics.get('one_year', 0)*100:.2f}%"
+                sixtyforty_5y = f"{sixtyforty_metrics.get('five_year', 0)*100:.2f}%"
+                sixtyforty_si = f"{sixtyforty_metrics.get('since_inception', 0)*100:.2f}%"
+            else:
+                sixtyforty_ytd = sixtyforty_1y = sixtyforty_5y = sixtyforty_si = "N/A"
+        else:
+            sixtyforty_ytd = sixtyforty_1y = sixtyforty_5y = sixtyforty_si = "N/A"
+        
         # Create performance table
         perf_data = [
             ['Period', 'RQA Global Adaptive', 'Global 60/40'],
-            ['YTD', f"{ga_metrics['ytd']*100:.2f}%", "N/A"],
-            ['1 Year', f"{ga_metrics['one_year']*100:.2f}%", "N/A"],
-            ['5 Year', f"{ga_metrics['five_year']*100:.2f}%", "N/A"],
-            ['Since Inception', f"{ga_metrics['since_inception']*100:.2f}%", "N/A"]
+            ['YTD', f"{ga_metrics['ytd']*100:.2f}%", sixtyforty_ytd],
+            ['1 Year', f"{ga_metrics['one_year']*100:.2f}%", sixtyforty_1y],
+            ['5 Year', f"{ga_metrics['five_year']*100:.2f}%", sixtyforty_5y],
+            ['Since Inception', f"{ga_metrics['since_inception']*100:.2f}%", sixtyforty_si]
         ]
         
         perf_table = Table(perf_data)
@@ -1710,13 +1729,13 @@ def create_analytics_dashboard(data, ga_metrics):
                 text-shadow: 0 3px 6px rgba(0,0,0,0.4);
             "            ">PORTFOLIO</h1>
             <div style="width: 80%; height: 2px; background: white; margin: 1rem auto;"></div>
-            <h2 style=""
+            <h2 style="
                     margin: 0;
-                    font-size: 2.5rem;
+                    font-size: 4rem;
                     font-weight: 300;
-                    letter-spacing: 0.3rem;
+                    letter-spacing: 0.2rem;
                     color: white;
-                    text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                    text-shadow: 0 3px 6px rgba(0,0,0,0.4);
                 ">ANALYTICS</h2>
         </div>
         <div style="flex-shrink: 0; width: 120px;"></div>

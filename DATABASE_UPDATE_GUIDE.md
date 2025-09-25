@@ -24,7 +24,7 @@ The `update_database.py` script automates this complete workflow:
 ```
 📊 GAM.xlsx (Updated)
     ↓
-🔄 impute_data.py (Get market data from Yahoo Finance)
+🔄 impute_data.py (Get market data from Tingo)
     ↓  
 💾 excel_to_database.py (Convert to SQLite)
     ↓
@@ -86,7 +86,7 @@ python migrate_to_postgres.py
    - Check the file name is exactly "GAM.xlsx"
 
 2. **Script fails during imputation**
-   - Check internet connection (needed for Yahoo Finance data)
+   - Check internet connection (needed for Tingo data)
    - Verify Excel file has the correct format
 
 3. **PostgreSQL migration fails**
