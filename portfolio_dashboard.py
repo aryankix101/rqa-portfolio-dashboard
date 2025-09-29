@@ -828,7 +828,7 @@ def create_allocation_pie_chart(data):
             showarrow=False, font=dict(size=16)
         )
         fig.update_layout(
-            title='Current Asset Allocation',
+            title='Target Asset Allocation',
             height=500
         )
         return fig
@@ -1079,163 +1079,7 @@ def main():
     else:
         create_analytics_dashboard(data, ga_metrics)
 
-def generate_pdf_report(data, ga_metrics):
-    """Generate PDF report of the strategy fact sheet"""
-    try:
-        from reportlab.lib import colors
-        from reportlab.lib.pagesizes import letter, A4
-        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import inch
-        from reportlab.graphics.shapes import Drawing
-        from reportlab.graphics.charts.linecharts import HorizontalLineChart
-        import tempfile
-        
-        buffer = BytesIO()
-        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
-        
-        # Get styles
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=24,
-            spaceAfter=30,
-            alignment=1,  # Center alignment
-            textColor=colors.HexColor('#1e3a8a')
-        )
-        
-        header_style = ParagraphStyle(
-            'CustomHeader',
-            parent=styles['Heading2'],
-            fontSize=16,
-            spaceAfter=12,
-            textColor=colors.HexColor('#3b5998'),
-            backColor=colors.HexColor('#f0f4f8'),
-            borderPadding=8
-        )
-        
-        story = []
-        
-        # Title
-        story.append(Paragraph("RQA Global Adaptive Strategy", title_style))
-        story.append(Paragraph(f"Fact Sheet - {datetime.now().strftime('%B %d, %Y')}", styles['Normal']))
-        story.append(Spacer(1, 20))
-        
-        # Strategy Overview
-        story.append(Paragraph("STRATEGY OVERVIEW", header_style))
-        overview_text = """
-        Global Adaptive (GA) is designed to meet the challenges of today's ever-changing markets by allocating 
-        capital across major global asset classes through a disciplined, data-driven process. Traditional approaches, 
-        such as the 60/40 stock-bond portfolio, rely on static assumptions that may leave investors overexposed when 
-        conditions shift. Instead, GA takes a dynamic approach. By continuously evaluating global opportunities, the 
-        strategy seeks to increase exposure to asset classes showing strength while reducing or avoiding those losing 
-        momentum. This adaptability allows the portfolio to respond proactively rather than reactively, providing the 
-        potential for stronger risk-adjusted returns over time.
-        """
-        story.append(Paragraph(overview_text, styles['Normal']))
-        story.append(Spacer(1, 15))
-        
-        # Performance Metrics
-        story.append(Paragraph("STRATEGY RETURNS (Net of Fees)", header_style))
-        
-        # Get benchmark data for 60/40 portfolio
-        benchmark_data = data.get('benchmark_performance', pd.DataFrame())
-        if not benchmark_data.empty:
-            # Find 60/40 portfolio data
-            sixtyforty_data = benchmark_data[benchmark_data['portfolio'] == '60/40']
-            if not sixtyforty_data.empty:
-                sixtyforty_metrics = sixtyforty_data.iloc[0]
-                sixtyforty_ytd = f"{sixtyforty_metrics.get('ytd', 0)*100:.2f}%"
-                sixtyforty_1y = f"{sixtyforty_metrics.get('one_year', 0)*100:.2f}%"
-                sixtyforty_5y = f"{sixtyforty_metrics.get('five_year', 0)*100:.2f}%"
-                sixtyforty_si = f"{sixtyforty_metrics.get('since_inception', 0)*100:.2f}%"
-            else:
-                sixtyforty_ytd = sixtyforty_1y = sixtyforty_5y = sixtyforty_si = "N/A"
-        else:
-            sixtyforty_ytd = sixtyforty_1y = sixtyforty_5y = sixtyforty_si = "N/A"
-        
-        # Create performance table
-        perf_data = [
-            ['Period', 'RQA Global Adaptive', 'Global 60/40'],
-            ['YTD', f"{ga_metrics['ytd']*100:.2f}%", sixtyforty_ytd],
-            ['1 Year', f"{ga_metrics['one_year']*100:.2f}%", sixtyforty_1y],
-            ['5 Year', f"{ga_metrics['five_year']*100:.2f}%", sixtyforty_5y],
-            ['Since Inception', f"{ga_metrics['since_inception']*100:.2f}%", sixtyforty_si]
-        ]
-        
-        perf_table = Table(perf_data)
-        perf_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b5998')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        
-        story.append(perf_table)
-        story.append(Spacer(1, 20))
-        
-        # Key Metrics
-        story.append(Paragraph("KEY METRICS", header_style))
-        metrics_data = [
-            ['Metric', 'Value'],
-            ['Sharpe Ratio', f"{ga_metrics.get('sharpe_ratio', 0):.2f}"],
-            ['Standard Deviation', f"{ga_metrics.get('standard_deviation', 0)*100:.1f}%"],
-            ['Beta to S&P 500', f"{ga_metrics.get('beta_to_sp500', 0):.2f}"]
-        ]
-        
-        metrics_table = Table(metrics_data)
-        metrics_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b5998')),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        
-        story.append(metrics_table)
-        story.append(Spacer(1, 20))
-        
-        # Key Strategy Features
-        story.append(Paragraph("KEY STRATEGY FEATURES", header_style))
-        features_text = """
-        • Dynamic Asset Allocation across global markets<br/>
-        • Quantitative risk management framework<br/>
-        • Tactical rebalancing based on market conditions<br/>
-        • Diversified exposure to multiple asset classes<br/>
-        • Active downside protection during market stress<br/>
-        • Evidence-based investment process
-        """
-        story.append(Paragraph(features_text, styles['Normal']))
-        
-        # Footer
-        story.append(Spacer(1, 30))
-        footer_text = f"Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')} | Richmond Quantitative Advisors"
-        footer_style = ParagraphStyle(
-            'Footer',
-            parent=styles['Normal'],
-            fontSize=8,
-            alignment=1,  # Center alignment
-            textColor=colors.grey
-        )
-        story.append(Paragraph(footer_text, footer_style))
-        
-        # Build PDF
-        doc.build(story)
-        buffer.seek(0)
-        return buffer.getvalue()
-        
-    except ImportError:
-        raise Exception("ReportLab library not installed. Please run: pip install reportlab")
-    except Exception as e:
-        raise Exception(f"Error generating PDF: {str(e)}")
+
 
 def create_fact_sheet_landing(data, ga_metrics):
     # Clean Professional Header with Logo and Strategy Name
@@ -1267,13 +1111,13 @@ def create_fact_sheet_landing(data, ga_metrics):
         background-position: center, center;
         background-repeat: no-repeat;
         color: white;
-        padding: 3rem 4rem;
+        padding: 1.5rem 4rem;
         margin: -1rem -1rem 3rem -1rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        min-height: 140px;
+        min-height: 90px;
         position: relative;
     ">
         <div style="flex-shrink: 0;">
@@ -1282,26 +1126,17 @@ def create_fact_sheet_landing(data, ga_metrics):
         <div style="text-align: center; flex: 1; margin-left: 2rem;">
             <h1 style="
                 margin: 0;
-                font-size: 4rem;
+                font-size: 3.2rem;
                 font-weight: 300;
                 letter-spacing: 0.2rem;
                 color: white;
                 line-height: 1.1;
                 text-shadow: 0 3px 6px rgba(0,0,0,0.4);
-            ">GLOBAL</h1>
-            <h1 style="
-                margin: -0.2rem 0 0.3rem 0;
-                font-size: 4rem;
-                font-weight: 300;
-                letter-spacing: 0.2rem;
-                color: white;
-                line-height: 1.1;
-                text-shadow: 0 3px 6px rgba(0,0,0,0.4);
-            ">ADAPTIVE</h1>
-            <div style="width: 80%; height: 2px; background: white; margin: 1rem auto;"></div>
+            ">GLOBAL ADAPTIVE</h1>
+            <div style="width: 60%; height: 2px; background: white; margin: 0.5rem auto;"></div>
             <h2 style="
                 margin: 0;
-                font-size: 2.5rem;
+                font-size: 2rem;
                 font-weight: 300;
                 letter-spacing: 0.3rem;
                 color: white;
@@ -1312,56 +1147,7 @@ def create_fact_sheet_landing(data, ga_metrics):
     </div>
     """, unsafe_allow_html=True)
 
-    # Professional PDF Export Icon - positioned above everything in top right
-    try:
-        pdf_buffer = generate_pdf_report(data, ga_metrics)
-        
-        # Create download link with professional icon
-        b64_pdf = base64.b64encode(pdf_buffer).decode()
-        filename = f"RQA_Global_Adaptive_Strategy_Report_{datetime.now().strftime('%Y%m%d')}.pdf"
-        
-        st.markdown(f"""
-        <div style="
-            position: fixed; 
-            top: 15px; 
-            right: 25px; 
-            z-index: 9999;
-            background: transparent;
-        ">
-            <a href="data:application/pdf;base64,{b64_pdf}" 
-               download="{filename}"
-               style="text-decoration: none;">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" 
-                     style="cursor: pointer; opacity: 0.7; transition: opacity 0.2s;"
-                     onmouseover="this.style.opacity='1'"
-                     onmouseout="this.style.opacity='0.7'">
-                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z" 
-                          fill="#1e3a8a"/>
-                    <path d="M14 2V8H20" fill="#60a5fa"/>
-                    <path d="M12 18L8 14H10.5V10H13.5V14H16L12 18Z" fill="white"/>
-                </svg>
-            </a>
-        </div>
-        """, unsafe_allow_html=True)
-        
-    except Exception as e:
-        # Fallback if PDF generation fails
-        st.markdown(f"""
-        <div style="
-            position: fixed; 
-            top: 15px; 
-            right: 25px; 
-            z-index: 9999;
-        ">
-            <div title="PDF Export Error: {str(e)}" style="opacity: 0.3;">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="#cccccc">
-                    <path d="M14 2H6C4.9 2 4 2.9 4 4V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V8L14 2Z"/>
-                    <path d="M14 2V8H20" fill="#e0e0e0"/>
-                    <path d="M12 18L8 14H10.5V10H13.5V14H16L12 18Z" fill="white"/>
-                </svg>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+
     
     # Main content layout
     col1, col2 = st.columns([2, 1])
@@ -1541,7 +1327,7 @@ def create_fact_sheet_landing(data, ga_metrics):
                     padding: 1rem 2rem;
                     border-radius: 8px;
                     margin-bottom: 1rem;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">CURRENT ALLOCATION</h2>
+            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold; line-height: 1.1;">TARGET<br>ALLOCATION</h2>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1648,18 +1434,7 @@ def create_fact_sheet_landing(data, ga_metrics):
         </ul>
         """, unsafe_allow_html=True)
 
-        # Download factsheet button only
-        pdf_buffer = generate_pdf_report(data, ga_metrics)
-        
-        st.download_button(
-            label="📄 Download Factsheet",
-            data=pdf_buffer,
-            file_name="RQA_Strategy_Factsheet.pdf",
-            mime="application/pdf",
-            key="factsheet_download",
-            help="Click to download the strategy factsheet PDF",
-            use_container_width=True
-        )
+
 
     # Add disclaimer with enhanced styling
     st.markdown("""
@@ -1754,7 +1529,7 @@ def create_analytics_dashboard(data, ga_metrics):
     
     # Main content tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "Current Allocation", 
+        "Target Allocation", 
         "Trailing 12M Allocations", 
         "Monthly Returns", 
         "Benchmark Performance", 
@@ -1768,7 +1543,7 @@ def create_analytics_dashboard(data, ga_metrics):
                     padding: 1rem 2rem;
                     border-radius: 8px;
                     margin-bottom: 1rem;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">CURRENT PORTFOLIO ALLOCATION</h2>
+            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">TARGET PORTFOLIO ALLOCATION</h2>
         </div>
         """, unsafe_allow_html=True)
         col1, col2 = st.columns([1, 1])
@@ -1781,7 +1556,7 @@ def create_analytics_dashboard(data, ga_metrics):
             df = data['gam_allocations'].copy()
             
             if df.empty:
-                st.markdown("### Current Allocation Breakdown")
+                st.markdown("### Target Allocation Breakdown")
                 st.markdown("*No allocation data available*")
             else:
                 df['date'] = pd.to_datetime(df['date'])
@@ -1821,7 +1596,7 @@ def create_analytics_dashboard(data, ga_metrics):
                 display_allocation.columns = ['Asset Class', 'Allocation (%)']
                 display_allocation['Allocation (%)'] = (display_allocation['Allocation (%)'] * 100).round(2)  # Convert to percentage
                 
-                st.markdown("### Current Allocation Breakdown")
+                st.markdown("### Target Allocation Breakdown")
                 st.dataframe(display_allocation, width='stretch', hide_index=True)
     
     with tab2:
