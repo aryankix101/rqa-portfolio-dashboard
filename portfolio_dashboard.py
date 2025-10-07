@@ -1111,7 +1111,7 @@ def create_fact_sheet_landing(data, ga_metrics):
         background-position: center, center;
         background-repeat: no-repeat;
         color: white;
-        padding: 1.5rem 4rem;
+        padding: 1.5rem 3rem;
         margin: -1rem -1rem 3rem -1rem;
         display: flex;
         justify-content: space-between;
@@ -1123,7 +1123,8 @@ def create_fact_sheet_landing(data, ga_metrics):
         <div style="flex-shrink: 0;">
             {logo_html}
         </div>
-        <div style="text-align: center; flex: 1; margin-left: 2rem;">
+        <div style="flex: 1;"></div>
+        <div style="text-align: right; flex-shrink: 0; margin-right: -1rem;">
             <h1 style="
                 margin: 0;
                 font-size: 3.2rem;
@@ -1133,7 +1134,12 @@ def create_fact_sheet_landing(data, ga_metrics):
                 line-height: 1.1;
                 text-shadow: 0 3px 6px rgba(0,0,0,0.4);
             ">GLOBAL ADAPTIVE</h1>
-            <div style="width: 60%; height: 2px; background: white; margin: 0.5rem auto;"></div>
+            <div style="
+                width: 280px; 
+                height: 2px; 
+                background: white; 
+                margin: 0.5rem 0 0.5rem auto;
+            "></div>
             <h2 style="
                 margin: 0;
                 font-size: 2rem;
@@ -1143,7 +1149,6 @@ def create_fact_sheet_landing(data, ga_metrics):
                 text-shadow: 0 2px 4px rgba(0,0,0,0.3);
             ">STRATEGY</h2>
         </div>
-        <div style="flex-shrink: 0; width: 120px;"></div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1411,23 +1416,23 @@ def create_fact_sheet_landing(data, ga_metrics):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
         </div>
         <ul style="list-style:none; padding:0; margin:0 0 0.5rem 0;">
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Tactical Asset Allocation</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Global Diversification</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Systematic Risk Management</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:#1f2937;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Daily Liquidity</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem; color:#1f2937;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem; color:white;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Monthly Rebalancing</span>
             </li>
@@ -1481,39 +1486,44 @@ def create_analytics_dashboard(data, ga_metrics):
         background-position: center, center;
         background-repeat: no-repeat;
         color: white;
-        padding: 3rem 4rem;
+        padding: 1.5rem 3rem;
         margin: -1rem -1rem 3rem -1rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        min-height: 140px;
+        min-height: 90px;
         position: relative;
     ">
         <div style="flex-shrink: 0;">
             {logo_html}
         </div>
-        <div style="text-align: center; flex: 1; margin-left: 2rem;">
+        <div style="flex: 1;"></div>
+        <div style="text-align: right; flex-shrink: 0; margin-right: -1rem;">
             <h1 style="
                 margin: 0;
-                font-size: 4rem;
+                font-size: 3.2rem;
                 font-weight: 300;
                 letter-spacing: 0.2rem;
                 color: white;
                 line-height: 1.1;
                 text-shadow: 0 3px 6px rgba(0,0,0,0.4);
-            "            ">PORTFOLIO</h1>
-            <div style="width: 80%; height: 2px; background: white; margin: 1rem auto;"></div>
+            ">PORTFOLIO</h1>
+            <div style="
+                width: 280px; 
+                height: 2px; 
+                background: white; 
+                margin: 0.5rem 0 0.5rem auto;
+            "></div>
             <h2 style="
-                    margin: 0;
-                    font-size: 4rem;
-                    font-weight: 300;
-                    letter-spacing: 0.2rem;
-                    color: white;
-                    text-shadow: 0 3px 6px rgba(0,0,0,0.4);
-                ">ANALYTICS</h2>
+                margin: 0;
+                font-size: 2rem;
+                font-weight: 300;
+                letter-spacing: 0.3rem;
+                color: white;
+                text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            ">ANALYTICS</h2>
         </div>
-        <div style="flex-shrink: 0; width: 120px;"></div>
     </div>
     """, unsafe_allow_html=True)
     
