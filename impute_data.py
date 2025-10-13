@@ -54,7 +54,7 @@ def get_portfolio_return(weights, returns_dict):
 portfolio_returns = {name: get_portfolio_return(w, returns_dict) for name, w in portfolios.items()}
 
 # Open the Excel file
-wb = openpyxl.load_workbook('GAM.xlsx')
+wb = openpyxl.load_workbook('GAM_new copy.xlsx')
 ws = wb.active
 
 # Map columns D-I to tickers/portfolios directly (order: ACWI, AGG, SPY, 50/50, 60/40, 70/30)
@@ -106,5 +106,5 @@ for date in returns_dict['ACWI'].index:
         if val is not None and not (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
             ws.cell(row=row, column=col_map[p]).value = round(val, 4)
 
-wb.save('GAM.xlsx')
+wb.save('GAM_new copy.xlsx')
 print("Excel file updated successfully!")

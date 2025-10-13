@@ -18,10 +18,6 @@ try:
 except ImportError:
     POSTGRES_AVAILABLE = False
 
-
-
-
-
 # Configure Streamlit page
 st.set_page_config(
     page_title="Strategy Fact Sheet",
@@ -737,10 +733,13 @@ def create_attribution_chart(data):
         ordered_months = list(pivot_df.index)
     
     for asset in final_columns:
+        # Defensive programming: ensure asset is a string
+        asset_str = str(asset) if pd.notna(asset) else 'Unknown'
+        
         fig.add_trace(go.Bar(
             x=pivot_df.index,
             y=pivot_df[asset],
-            name=asset.replace('_', ' ').replace('SP500', 'S&P 500').replace('US LT Treas', 'U.S. LT Treas').replace('US REITs', 'U.S. REITs').replace('Intl Dev Stocks', 'Intl. Dev. Stocks').replace('EM Stocks', 'EM Stocks'),
+            name=asset_str.replace('_', ' ').replace('SP500', 'S&P 500').replace('US LT Treas', 'U.S. LT Treas').replace('US REITs', 'U.S. REITs').replace('Intl Dev Stocks', 'Intl. Dev. Stocks').replace('EM Stocks', 'EM Stocks'),
             marker_color=colors.get(asset, '#1f77b4'),
             hovertemplate=f'<b>{asset}</b><br>Month: %{{x}}<br>Attribution: %{{y:.2f}}%<extra></extra>'
         ))
@@ -845,11 +844,11 @@ def create_allocation_pie_chart(data):
         'Vanguard Real Estate Index Fund': 'U.S. Real Estate (REITs)',
         'Schwab Emerging Markets Equity ETF': 'Emerging Market Stocks',
         'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
-        'iShares 20+ Year Treasury Bond ETF': 'U.S. Long Term Treasuries',
+        'iShares 20+ Year Treasury Bond ETF': 'Cash',
         'Cash': 'Cash',
         'SP500': 'U.S. Stocks (S&P 500)',
         'US_REITs': 'U.S. Real Estate (REITs)', 
-        'US_LT_Treas': 'U.S. Long Term Treasuries',
+        'US_LT_Treas': 'Cash',
         'Intl_Dev_Stocks': 'International Developed Stocks',
         'EM_Stocks': 'Emerging Market Stocks',
         'Commodities': 'Commodities',
@@ -867,6 +866,9 @@ def create_allocation_pie_chart(data):
     # Apply name mapping
     latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
     
+    # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
+    latest_allocation = latest_allocation.groupby('display_name')['allocation_percentage'].sum().reset_index()
+    
     # Custom blue color scheme for pie chart
     colors = {
         'SP500': '#80c1ff',  
@@ -881,11 +883,10 @@ def create_allocation_pie_chart(data):
         'U.S. Stocks (S&P 500)': '#80c1ff',
         'Gold': '#4da6ff',
         'U.S. Real Estate (REITs)': '#337fcc',
-        'U.S. Long Term Treasuries': '#1a5fb4',
         'International Developed Stocks': '#00509e',
         'Emerging Market Stocks': '#004080',
         'Commodities': '#003366',
-        'Cash': '#001f3f'
+        'Cash': '#1a5fb4'
     }
     
     # Create color list based on display names in the data
@@ -1357,7 +1358,7 @@ def create_fact_sheet_landing(data, ga_metrics):
             asset_name_map = {
                 'SP500': 'U.S. Stocks (S&P 500)',
                 'US_REITs': 'U.S. Real Estate (REITs)', 
-                'US_LT_Treas': 'U.S. Long Term Treasuries',
+                'US_LT_Treas': 'Cash',
                 'Intl_Dev_Stocks': 'International Developed Stocks',
                 'EM_Stocks': 'Emerging Market Stocks',
                 'Commodities': 'Commodities',
@@ -1370,7 +1371,7 @@ def create_fact_sheet_landing(data, ga_metrics):
                 'Vanguard Real Estate Index Fund': 'U.S. Real Estate (REITs)',
                 'Schwab Emerging Markets Equity ETF': 'Emerging Market Stocks',
                 'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
-                'iShares 20+ Year Treasury Bond ETF': 'U.S. Long Term Treasuries',
+                'iShares 20+ Year Treasury Bond ETF': 'Cash',
                 # Additional possible variants
                 'iShares Core MSCI Total International Stock ETF': 'International Developed Stocks',
                 'Vanguard Real Estate Index Fund ETF Shares': 'U.S. Real Estate (REITs)',
@@ -1378,15 +1379,15 @@ def create_fact_sheet_landing(data, ga_metrics):
                 'Invesco DB Commodity Index Tracking Fund': 'Commodities'
             }
             
-            for _, row in latest_allocation.iterrows():
-                asset_name = row['asset_name']
-                # Map to display name - check for exact match first, then partial matches
-                display_name = asset_name_map.get(asset_name, asset_name)
-                if display_name == asset_name:  # No exact match found, try partial matching
-                    for key, value in asset_name_map.items():
-                        if key.lower() in asset_name.lower() or asset_name.lower() in key.lower():
-                            display_name = value
-                            break
+            # Apply name mapping
+            latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
+            
+            # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
+            combined_allocation = latest_allocation.groupby('display_name')['allocation_percentage'].sum().reset_index()
+            combined_allocation = combined_allocation.sort_values('allocation_percentage', ascending=False)
+            
+            for _, row in combined_allocation.iterrows():
+                display_name = row['display_name']
                 
                 allocation = row['allocation_percentage'] * 100  # Convert to percentage
                 
@@ -1416,23 +1417,23 @@ def create_fact_sheet_landing(data, ga_metrics):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
         </div>
         <ul style="list-style:none; padding:0; margin:0 0 0.5rem 0;">
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Tactical Asset Allocation</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Global Diversification</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Systematic Risk Management</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem; color:white;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Daily Liquidity</span>
             </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem; color:white;">
+            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem;">
                 <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
                 <span style="line-height:1.15;">Monthly Rebalancing</span>
             </li>
@@ -1586,11 +1587,11 @@ def create_analytics_dashboard(data, ga_metrics):
                     'Vanguard Real Estate Index Fund': 'U.S. Real Estate (REITs)',
                     'Schwab Emerging Markets Equity ETF': 'Emerging Market Stocks',
                     'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
-                    'iShares 20+ Year Treasury Bond ETF': 'U.S. Long Term Treasuries',
+                    'iShares 20+ Year Treasury Bond ETF': 'Cash',
                     'Cash': 'Cash',
                     'SP500': 'U.S. Stocks (S&P 500)',
                     'US_REITs': 'U.S. Real Estate (REITs)', 
-                    'US_LT_Treas': 'U.S. Long Term Treasuries',
+                    'US_LT_Treas': 'Cash',
                     'Intl_Dev_Stocks': 'International Developed Stocks',
                     'EM_Stocks': 'Emerging Market Stocks',
                     'Commodities': 'Commodities',
@@ -1599,6 +1600,9 @@ def create_analytics_dashboard(data, ga_metrics):
                 
                 # Apply name mapping
                 latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
+                
+                # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
+                latest_allocation = latest_allocation.groupby('display_name')['allocation_percentage'].sum().reset_index()
                 
                 # Create final dataframe with abbreviated names
                 display_allocation = latest_allocation[['display_name', 'allocation_percentage']].copy()

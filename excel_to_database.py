@@ -66,13 +66,13 @@ def create_database():
 # Read Excel data
 def read_excel_data():
     """
-    Read GAM.xlsx and extract all data for the 4 charts/tables needed:
+    Read file and extract all data for the 4 charts/tables needed:
     1. Monthly Returns (columns 1-9)
     2. GAM Allocations (columns 10-17) 
     3. GAM Attribution (columns 18-25)
     4. Benchmark data for performance comparison
     """
-    wb = openpyxl.load_workbook('GAM.xlsx')
+    wb = openpyxl.load_workbook('GAM_new copy.xlsx')
     ws = wb.active
     
     # Asset mapping for display names in charts
