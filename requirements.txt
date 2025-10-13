@@ -7,3 +7,4 @@ sqlalchemy>=2.0
 psycopg2-binary
 toml>=0.10.2
 reportlab>=4.0.0
+schedule>=1.2.0

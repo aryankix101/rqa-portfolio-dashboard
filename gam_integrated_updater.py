@@ -526,19 +526,6 @@ class GAMMonthlyUpdater:
             success = self.update_excel_surgical(gam_df)
             
             if success:
-                # Step 8: Update database with new Excel data
-                print("\nUpdating local database...")
-                try:
-                    import subprocess
-                    result = subprocess.run(['python', 'excel_to_database.py'], 
-                                          capture_output=True, text=True, cwd='.')
-                    if result.returncode == 0:
-                        print("✅ Database updated successfully")
-                    else:
-                        print(f"⚠️  Database update warning: {result.stderr}")
-                except Exception as db_error:
-                    print(f"⚠️  Database update failed: {db_error}")
-                
                 print("\n🎉 GAM Monthly Update Completed Successfully!")
                 print("Summary:")
                 print(f"  - Processed {len(all_accounts_cnav)} GAMMorningstar accounts")

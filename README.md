@@ -69,6 +69,27 @@ streamlit run portfolio_dashboard.py
 
 The dashboard will open in your browser at `http://localhost:8501`
 
+### Monthly Data Automation
+
+Automate the monthly data pipeline with the scheduler script:
+
+```bash
+# Run once manually
+python monthly_automation.py
+
+# Run immediately (bypass scheduling)
+python monthly_automation.py --now
+
+# Run as background daemon (schedules for 8:15 AM on 1st of month)
+python monthly_automation.py --daemon
+```
+
+The automation script executes the complete monthly workflow:
+1. **GAM Data Update**: Fetches latest data via IBKR API
+2. **Market Data Imputation**: Updates benchmark and market data
+3. **Database Update**: Imports Excel data to local SQLite database
+4. **PostgreSQL Migration**: Syncs data to production database
+
 ### Database Export (Optional)
 
 Export database tables for analysis:
@@ -81,11 +102,15 @@ python export_database.py
 ```
 rqa-portfolio-dashboard/
 ├── portfolio_dashboard.py      # Main Streamlit dashboard
+├── gam_integrated_updater.py   # GAM data updater (IBKR API)
+├── monthly_automation.py       # Monthly workflow scheduler
+├── impute_data.py             # Market data imputation
 ├── excel_to_database.py       # Database creation from Excel
+├── migrate_to_postgres.py     # PostgreSQL migration
 ├── export_database.py         # Database export utilities
 ├── requirements.txt           # Python dependencies
 ├── portfolio_data.db          # SQLite database (generated)
-├── GAM.xlsx                   # Source data file
+├── GAM_new copy.xlsx          # Source data file
 └── README.md                  # This file
 ```
 
