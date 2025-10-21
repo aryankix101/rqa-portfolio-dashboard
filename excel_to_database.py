@@ -65,17 +65,9 @@ def create_database():
 
 # Read Excel data
 def read_excel_data():
-    """
-    Read file and extract all data for the 4 charts/tables needed:
-    1. Monthly Returns (columns 1-9)
-    2. GAM Allocations (columns 10-17) 
-    3. GAM Attribution (columns 18-25)
-    4. Benchmark data for performance comparison
-    """
     wb = openpyxl.load_workbook('GAM_new copy.xlsx')
     ws = wb.active
     
-    # Asset mapping for display names in charts
     asset_mapping = {
         'PDBC': 'Commodities',
         'VWO': 'EM_Stocks', 
@@ -183,43 +175,32 @@ def read_excel_data():
             pd.DataFrame(gam_allocations_data), 
             pd.DataFrame(gam_attribution_data))
 
-# Calculate annualized return
 def annualized_return(returns, periods):
-    """Calculate annualized return over specified periods using compound returns"""
     if len(returns) < periods:
         return None
-    # Get the returns for the specified period
     period_returns = returns.tail(periods)
-    # Calculate cumulative return by compounding
     cumulative_return = (1 + period_returns).prod()
-    # Annualize the cumulative return
     years = periods / 12
     return cumulative_return ** (1/years) - 1
 
-# Calculate standard deviation (annualized)
 def annualized_std(returns):
     return returns.std() * np.sqrt(12)
 
-# Calculate Sharpe ratio using geometric mean compounded and annualized
 def sharpe_ratio(returns):
     if len(returns) == 0:
         return None
     
-    # Calculate annualized return using geometric mean
     cumulative_return = (1 + returns).prod()
     years = len(returns) / 12
     annualized_return = cumulative_return ** (1/years) - 1 if years > 0 else 0
     
-    # Calculate annualized volatility
     annualized_volatility = returns.std() * np.sqrt(12)
     
-    # Sharpe ratio = annualized return / annualized volatility
     if annualized_volatility == 0:
         return None
     
     return annualized_return / annualized_volatility
 
-# Calculate beta to S&P 500
 def calculate_beta(portfolio_returns, spy_returns):
     if len(portfolio_returns) == 0 or len(spy_returns) == 0:
         return None
@@ -229,7 +210,6 @@ def calculate_beta(portfolio_returns, spy_returns):
         return None
     return covariance / spy_variance
 
-# Calculate YTD return
 def ytd_return(returns, dates):
     current_year = datetime.now().year
     ytd_data = returns[dates.dt.year == current_year]
@@ -239,32 +219,15 @@ def ytd_return(returns, dates):
 
 # Store data in database
 def store_all_data(conn, monthly_returns_df, gam_allocations_df, gam_attribution_df):
-    """Store all extracted data into the respective database tables"""
-    
-    # Store monthly returns
     monthly_returns_df.to_sql('monthly_returns', conn, if_exists='replace', index=False)
-    print(f"Stored {len(monthly_returns_df)} monthly return records")
-    
-    # Store GAM allocations
     gam_allocations_df.to_sql('gam_allocations', conn, if_exists='replace', index=False)
-    print(f"Stored {len(gam_allocations_df)} allocation records")
-    
-    # Store GAM attribution
     gam_attribution_df.to_sql('gam_attribution', conn, if_exists='replace', index=False)
-    print(f"Stored {len(gam_attribution_df)} attribution records")
 
 def calculate_benchmark_performance(conn, monthly_returns_df):
-    """
-    Calculate the Benchmark Performance table data.
-    This creates the table with GAM, 60/40, and 70/30 performance metrics.
-    """
-    
-    # Convert date column to datetime for calculations
     df = monthly_returns_df.copy()
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date').dropna()
     
-    # Define portfolios to analyze (matching your Benchmark Performance table)
     portfolios = {
         'GAM': 'gam_returns_net',
         '60/40': 'portfolio_60_40', 
@@ -281,7 +244,6 @@ def calculate_benchmark_performance(conn, monthly_returns_df):
         dates = df.loc[returns.index, 'date']
         spy_returns = df.loc[returns.index, 'spy'].dropna()
         
-        # Calculate all metrics matching your Benchmark Performance table
         ytd = ytd_return(returns, dates)
         one_year = annualized_return(returns, 12)
         five_year = annualized_return(returns, 60)
@@ -303,13 +265,8 @@ def calculate_benchmark_performance(conn, monthly_returns_df):
     
     performance_df = pd.DataFrame(performance_data)
     performance_df.to_sql('benchmark_performance', conn, if_exists='replace', index=False)
-    print(f"Calculated benchmark performance for {len(performance_data)} portfolios")
 
 def get_trailing_12m_allocations_chart_data(conn, months=12):
-    """
-    Query function to get GAM allocation data for creating the 
-    'Trailing 12 Month Allocations' stacked bar chart.
-    """
     query = '''
     SELECT date, asset_name, allocation_percentage
     FROM gam_allocations 
@@ -317,12 +274,10 @@ def get_trailing_12m_allocations_chart_data(conn, months=12):
     LIMIT ?
     '''
     
-    # Get data for charting
     cursor = conn.cursor()
-    cursor.execute(query, (months * 8,))  # 8 assets per month
+    cursor.execute(query, (months * 8,))
     results = cursor.fetchall()
     
-    # Convert to format suitable for stacked bar chart
     chart_data = {}
     for date, asset_name, percentage in results:
         if date not in chart_data:
@@ -332,10 +287,6 @@ def get_trailing_12m_allocations_chart_data(conn, months=12):
     return chart_data
 
 def get_attribution_chart_data(conn, months=12):
-    """
-    Query function to get GAM attribution data for creating the 
-    'Trailing 12 Month Portfolio Attribution' chart.
-    """
     query = '''
     SELECT date, asset_name, attribution_value
     FROM gam_attribution 
@@ -344,10 +295,9 @@ def get_attribution_chart_data(conn, months=12):
     '''
     
     cursor = conn.cursor()
-    cursor.execute(query, (months * 8,))  # 8 assets per month
+    cursor.execute(query, (months * 8,))
     results = cursor.fetchall()
     
-    # Convert to format suitable for attribution chart
     chart_data = {}
     for date, asset_name, attribution_value in results:
         if date not in chart_data:
@@ -363,58 +313,13 @@ def main():
     print("Reading Excel data...")
     monthly_returns_df, gam_allocations_df, gam_attribution_df = read_excel_data()
     
-    print("Storing all data...")
+    print("Storing data...")
     store_all_data(conn, monthly_returns_df, gam_allocations_df, gam_attribution_df)
     
-    print("Calculating benchmark performance metrics...")
+    print("Calculating benchmark performance...")
     calculate_benchmark_performance(conn, monthly_returns_df)
     
-    print("\nDatabase creation complete!")
-    
-    # Display summary statistics
-    cursor = conn.cursor()
-    
-    # Show monthly returns summary
-    cursor.execute("SELECT COUNT(*) FROM monthly_returns")
-    returns_count = cursor.fetchone()[0]
-    print(f"Monthly returns records: {returns_count}")
-    
-    # Show allocations summary  
-    cursor.execute("SELECT COUNT(*) FROM gam_allocations")
-    allocations_count = cursor.fetchone()[0]
-    print(f"GAM allocation records: {allocations_count}")
-    
-    # Show attribution summary
-    cursor.execute("SELECT COUNT(*) FROM gam_attribution")
-    attribution_count = cursor.fetchone()[0]
-    print(f"GAM attribution records: {attribution_count}")
-    
-    # Show benchmark performance results
-    cursor.execute("SELECT * FROM benchmark_performance")
-    performance_results = cursor.fetchall()
-    print("\nBenchmark Performance Results:")
-    print("Portfolio | YTD | 1-Year | 5-Year | Since Inception | Std Dev | Sharpe | Beta")
-    print("-" * 80)
-    for result in performance_results:
-        portfolio = result[0]
-        ytd = f"{result[1]:.1%}" if result[1] is not None else "N/A"
-        one_year = f"{result[2]:.1%}" if result[2] is not None else "N/A"
-        five_year = f"{result[3]:.1%}" if result[3] is not None else "N/A"
-        since_inception = f"{result[4]:.1%}" if result[4] is not None else "N/A"
-        std_dev = f"{result[5]:.1%}" if result[5] is not None else "N/A"
-        sharpe = f"{result[6]:.2f}" if result[6] is not None else "N/A"
-        beta = f"{result[7]:.2f}" if result[7] is not None else "N/A"
-        
-        print(f"{portfolio:9} | {ytd:7} | {one_year:6} | {five_year:6} | {since_inception:15} | {std_dev:7} | {sharpe:6} | {beta:4}")
-    
-    print("\n" + "="*80)
-    print("DATA EXTRACTION SUMMARY:")
-    print("="*80)
-    print("✅ Monthly Returns -> for 'Monthly Returns' table")
-    print("✅ GAM Allocations -> for 'Trailing 12 Month Allocations' chart") 
-    print("✅ GAM Attribution -> for 'Portfolio Attribution' chart")
-    print("✅ Benchmark Performance -> for 'Benchmark Performance' table")
-    print("="*80)
+    print("Database creation complete!")
     
     conn.close()
 

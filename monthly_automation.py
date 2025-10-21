@@ -1,16 +1,15 @@
 """
-Monthly Portfolio Data Automation Script
-========================================
+Monthly Portfolio Data Automation
 
-Runs on the 1st of every month at 8:15 AM to execute the complete data pipeline:
-1. Update GAM data via IBKR API (gam_integrated_updater.py)
-2. Impute market data (impute_data.py)
-3. Update local database (excel_to_database.py)
-4. Migrate to PostgreSQL (migrate_to_postgres.py)
+Runs monthly data pipeline:
+1. GAM data via IBKR API  
+2. Market data imputation
+3. Database update
+4. PostgreSQL migration
 
 Usage:
     python monthly_automation.py          # Run once manually
-    python monthly_automation.py --daemon # Run as background scheduler
+    python monthly_automation.py --daemon # Background scheduler  
     python monthly_automation.py --now    # Run immediately
 """
 
@@ -29,7 +28,6 @@ class MonthlyAutomation:
         self.setup_logging()
         self.running = True
         
-        # Scripts to run in order
         self.scripts = [
             "gam_integrated_updater.py",
             "impute_data.py", 
@@ -38,7 +36,6 @@ class MonthlyAutomation:
         ]
     
     def setup_logging(self):
-        """Setup logging to file and console"""
         log_file = os.path.join(self.script_dir, "monthly_automation.log")
         
         logging.basicConfig(
@@ -52,7 +49,6 @@ class MonthlyAutomation:
         self.logger = logging.getLogger(__name__)
     
     def run_script(self, script_name):
-        """Run a Python script and return success status"""
         script_path = os.path.join(self.script_dir, script_name)
         self.logger.info(f"Starting {script_name}...")
         
@@ -82,7 +78,6 @@ class MonthlyAutomation:
             return False
     
     def run_monthly_workflow(self):
-        """Execute the complete monthly workflow"""
         self.logger.info("🚀 Starting Monthly Portfolio Data Update")
         self.logger.info("=" * 50)
         
@@ -101,7 +96,6 @@ class MonthlyAutomation:
         return True
     
     def run_scheduled_job(self):
-        """Check if it's the 1st and run workflow"""
         if datetime.now().day == 1:
             self.logger.info("📅 First of month - running workflow")
             self.run_monthly_workflow()
@@ -109,7 +103,6 @@ class MonthlyAutomation:
             self.logger.info("📅 Not first of month - skipping")
     
     def start_scheduler(self):
-        """Start the background scheduler"""
         self.logger.info("⏰ Scheduling for 8:15 AM on 1st of every month")
         
         schedule.every().day.at("08:15").do(self.run_scheduled_job)
@@ -124,7 +117,6 @@ class MonthlyAutomation:
             self.logger.info("🛑 Scheduler stopped")
     
     def signal_handler(self, signum, frame):
-        """Handle shutdown signals"""
         self.running = False
 
 def main():

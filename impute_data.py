@@ -5,34 +5,51 @@ import openpyxl
 import toml
 import os
 
-# --- Load API Configuration from secrets ---
 def load_config():
-    """Load configuration from secrets.toml or TIINGO_API_KEY env."""
     try:
         env_key = os.getenv('TIINGO_API_KEY', '')
         if env_key:
-            return {'tiingo': {'api_key': env_key}}
-
+            return {
+                'tiingo': {
+                    'api_key': env_key
+                }
+            }
+        
         if os.path.exists('secrets.toml'):
             secrets = toml.load('secrets.toml')
+            
             if 'tiingo' in secrets and 'api_key' in secrets['tiingo']:
                 return secrets
+                
             if 'tiingo_api_key' in secrets:
-                return {'tiingo': {'api_key': secrets['tiingo_api_key']}}
-
-        return {'tiingo': {'api_key': ''}}
+                return {
+                    'tiingo': {
+                        'api_key': secrets['tiingo_api_key']
+                    }
+                }
+        
+        return {
+            'tiingo': {
+                'api_key': ''
+            }
+        }
+        
     except Exception as e:
         print(f"Error loading configuration: {e}")
-        return {'tiingo': {'api_key': ''}}
+        return {
+            'tiingo': {
+                'api_key': ''
+            }
+        }
 
 config = load_config()
 API_KEY = config.get('tiingo', {}).get('api_key', '')
+
 if not API_KEY:
     raise ValueError("Tiingo API key not found in secrets.toml or environment variables")
 
 headers = {'Content-Type': 'application/json', 'Authorization': f'Token {API_KEY}'}
 
-# Define tickers and portfolio weights
 tickers = ['ACWI', 'AGG', 'SPY']
 portfolios = {
     '50/50': {'ACWI': 0.5, 'AGG': 0.5},
@@ -40,12 +57,10 @@ portfolios = {
     '70/30': {'ACWI': 0.7, 'AGG': 0.3},
 }
 
-# Generate last calendar day of each month from July 2019 to today
 start = datetime(2019, 7, 1)
 today = datetime.today()
-dates = pd.date_range(start, today, freq='M')  # M = month end (calendar)
+dates = pd.date_range(start, today, freq='M')
 
-# Download price data for all tickers using requests and calculate adjusted monthly returns
 def get_monthly_adj_returns(ticker):
     url = f'https://api.tiingo.com/tiingo/daily/{ticker}/prices'
     params = {
@@ -59,9 +74,7 @@ def get_monthly_adj_returns(ticker):
     df = pd.DataFrame(data)
     df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
     df = df.set_index('date').sort_index()
-    # Get last calendar day of each month
     monthly = df['adjClose'].resample('M').last()
-    # Insert the first value as 0.0 for the first month (so 7/31/19 row is included)
     returns = monthly.pct_change()
     if not returns.empty:
         returns.iloc[0] = 0.0
@@ -69,20 +82,16 @@ def get_monthly_adj_returns(ticker):
 
 returns_dict = {t: get_monthly_adj_returns(t) for t in tickers}
 
-# Calculate portfolio returns
 def get_portfolio_return(weights, returns_dict):
-    # Align returns
     df = pd.DataFrame({t: returns_dict[t] for t in weights})
     port_ret = (df * pd.Series(weights)).sum(axis=1)
     return port_ret
 
 portfolio_returns = {name: get_portfolio_return(w, returns_dict) for name, w in portfolios.items()}
 
-# Open the Excel file
 wb = openpyxl.load_workbook('GAM_new copy.xlsx')
 ws = wb.active
 
-# Map columns D-I to tickers/portfolios directly (order: ACWI, AGG, SPY, 50/50, 60/40, 70/30)
 col_map = {
     'ACWI': 4,   # D
     'AGG': 5,    # E
@@ -92,7 +101,6 @@ col_map = {
     '70/30': 9   # I
 }
 
-# Only update rows with the specified dates and columns D-I, round to two decimals
 import numpy as np
 row_map = {}
 for row in range(2, ws.max_row+1):
@@ -117,15 +125,13 @@ for date in returns_dict['ACWI'].index:
     date_str = date.strftime('%-m/%-d/%y')
     row = row_map.get(date_str)
     if not row:
-        continue  # Only update existing rows
+        continue
     
-    # Update ticker returns
     for t in tickers:
         val = returns_dict[t].get(date, None)
         if val is not None and not (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
             ws.cell(row=row, column=col_map[t]).value = round(val, 4)
     
-    # Update portfolio returns
     for p in portfolios:
         val = portfolio_returns[p].get(date, None)
         if val is not None and not (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
