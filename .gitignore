@@ -106,10 +106,8 @@ tmp/
 *~
 
 # Other data formats
-*.json
 *.xml
 *.yaml
-*.yml
 *.toml
 *.ini
 *.cfg

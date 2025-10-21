@@ -2,9 +2,29 @@ import pandas as pd
 import requests
 from datetime import datetime
 import openpyxl
+import toml
+import os
 
-# --- Tiingo API Configuration ---
-API_KEY = '74d79406a6adbd63dfd68b80230cb624ed177ac4'
+# --- Load API Configuration from secrets ---
+def load_config():
+    """Load configuration from secrets.toml"""
+    secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.toml')
+    if os.path.exists(secrets_path):
+        return toml.load(secrets_path)
+    else:
+        # Fallback for GitHub Actions (secrets loaded as environment variables)
+        return {
+            'tiingo': {
+                'api_key': os.getenv('TIINGO_API_KEY', '')
+            }
+        }
+
+config = load_config()
+API_KEY = config.get('tiingo', {}).get('api_key', '')
+
+if not API_KEY:
+    raise ValueError("Tiingo API key not found in secrets.toml or environment variables")
+
 headers = {'Content-Type': 'application/json', 'Authorization': f'Token {API_KEY}'}
 
 # Define tickers and portfolio weights
