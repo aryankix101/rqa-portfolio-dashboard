@@ -10,7 +10,17 @@ def load_config():
     """Load configuration from secrets.toml"""
     secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.toml')
     if os.path.exists(secrets_path):
-        return toml.load(secrets_path)
+        try:
+            return toml.load(secrets_path)
+        except toml.TomlDecodeError as e:
+            print(f"Error parsing secrets.toml: {e}")
+            print("Falling back to environment variables...")
+            # Fallback to environment variables if TOML is malformed
+            return {
+                'tiingo': {
+                    'api_key': os.getenv('TIINGO_API_KEY', '')
+                }
+            }
     else:
         # Fallback for GitHub Actions (secrets loaded as environment variables)
         return {
