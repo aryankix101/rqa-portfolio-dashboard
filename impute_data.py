@@ -8,24 +8,44 @@ import os
 # --- Load API Configuration from secrets ---
 def load_config():
     """Load configuration from secrets.toml"""
-    secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.toml')
-    if os.path.exists(secrets_path):
-        try:
-            return toml.load(secrets_path)
-        except toml.TomlDecodeError as e:
-            print(f"Error parsing secrets.toml: {e}")
-            print("Falling back to environment variables...")
-            # Fallback to environment variables if TOML is malformed
+    try:
+        # First try environment variable (GitHub Actions)
+        env_key = os.getenv('TIINGO_API_KEY', '')
+        if env_key:
             return {
                 'tiingo': {
-                    'api_key': os.getenv('TIINGO_API_KEY', '')
+                    'api_key': env_key
                 }
             }
-    else:
-        # Fallback for GitHub Actions (secrets loaded as environment variables)
+        
+        # Then try TOML file (local development)
+        import toml
+        if os.path.exists('secrets.toml'):
+            secrets = toml.load('secrets.toml')
+            
+            # Try nested structure first [tiingo] api_key = "..."
+            if 'tiingo' in secrets and 'api_key' in secrets['tiingo']:
+                return secrets
+                
+            # Try flat structure tiingo_api_key = "..." (like db_url)
+            if 'tiingo_api_key' in secrets:
+                return {
+                    'tiingo': {
+                        'api_key': secrets['tiingo_api_key']
+                    }
+                }
+        
         return {
             'tiingo': {
-                'api_key': os.getenv('TIINGO_API_KEY', '')
+                'api_key': ''
+            }
+        }
+        
+    except Exception as e:
+        print(f"Error loading configuration: {e}")
+        return {
+            'tiingo': {
+                'api_key': ''
             }
         }
 

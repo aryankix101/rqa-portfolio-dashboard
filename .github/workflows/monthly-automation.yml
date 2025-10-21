@@ -9,7 +9,6 @@ on:
 jobs:
   monthly-update:
     runs-on: ubuntu-latest
-    environment: production  # Add this line to access environment secrets
     
     steps:
     - name: Checkout repository
