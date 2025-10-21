@@ -25,9 +25,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # Optional: only if you actually store a TOML blob in the SECRETS_TOML secret
     - name: Write secrets.toml
-      if: ${{ secrets.SECRETS_TOML != '' }}
       run: |
         printf '%s' "${{ secrets.SECRETS_TOML }}" > secrets.toml
 
