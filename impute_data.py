@@ -7,51 +7,26 @@ import os
 
 # --- Load API Configuration from secrets ---
 def load_config():
-    """Load configuration from secrets.toml"""
+    """Load configuration from secrets.toml or TIINGO_API_KEY env."""
     try:
-        # First try environment variable (GitHub Actions)
         env_key = os.getenv('TIINGO_API_KEY', '')
         if env_key:
-            return {
-                'tiingo': {
-                    'api_key': env_key
-                }
-            }
-        
-        # Then try TOML file (local development)
-        import toml
+            return {'tiingo': {'api_key': env_key}}
+
         if os.path.exists('secrets.toml'):
             secrets = toml.load('secrets.toml')
-            
-            # Try nested structure first [tiingo] api_key = "..."
             if 'tiingo' in secrets and 'api_key' in secrets['tiingo']:
                 return secrets
-                
-            # Try flat structure tiingo_api_key = "..." (like db_url)
             if 'tiingo_api_key' in secrets:
-                return {
-                    'tiingo': {
-                        'api_key': secrets['tiingo_api_key']
-                    }
-                }
-        
-        return {
-            'tiingo': {
-                'api_key': ''
-            }
-        }
-        
+                return {'tiingo': {'api_key': secrets['tiingo_api_key']}}
+
+        return {'tiingo': {'api_key': ''}}
     except Exception as e:
         print(f"Error loading configuration: {e}")
-        return {
-            'tiingo': {
-                'api_key': ''
-            }
-        }
+        return {'tiingo': {'api_key': ''}}
 
 config = load_config()
 API_KEY = config.get('tiingo', {}).get('api_key', '')
-
 if not API_KEY:
     raise ValueError("Tiingo API key not found in secrets.toml or environment variables")
 
