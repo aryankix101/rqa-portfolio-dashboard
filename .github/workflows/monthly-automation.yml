@@ -27,6 +27,9 @@ jobs:
     - name: Configure secrets
       run: |
         echo "${{ secrets.SECRETS_TOML }}" > secrets.toml
+        echo "--- Debug: secrets.toml content ---"
+        cat secrets.toml
+        echo "--- End debug ---"
       env:
         TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
       
