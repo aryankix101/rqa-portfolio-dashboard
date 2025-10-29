@@ -13,8 +13,8 @@ def create_database():
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS monthly_returns (
         date TEXT PRIMARY KEY,
-        gam_returns_gross REAL,
-        gam_returns_net REAL,
+        ga_returns_gross REAL,
+        ga_returns_net REAL,
         acwi REAL,
         agg REAL,
         spy REAL,
@@ -24,9 +24,9 @@ def create_database():
     )
     ''')
     
-    # Create gam_allocations table - for the Trailing 12 Month Allocations chart
+    # Create ga_allocations table - for the Trailing 12 Month Allocations chart
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS gam_allocations (
+    CREATE TABLE IF NOT EXISTS ga_allocations (
         date TEXT,
         asset_symbol TEXT,
         asset_name TEXT,
@@ -35,9 +35,9 @@ def create_database():
     )
     ''')
     
-    # Create gam_attribution table - for the Portfolio Attribution chart
+    # Create ga_attribution table - for the Portfolio Attribution chart
     cursor.execute('''
-    CREATE TABLE IF NOT EXISTS gam_attribution (
+    CREATE TABLE IF NOT EXISTS ga_attribution (
         date TEXT,
         asset_symbol TEXT,
         asset_name TEXT,
@@ -63,9 +63,8 @@ def create_database():
     conn.commit()
     return conn
 
-# Read Excel data
 def read_excel_data():
-    wb = openpyxl.load_workbook('GAM_new copy.xlsx')
+    wb = openpyxl.load_workbook('GA_new copy.xlsx')
     ws = wb.active
     
     asset_mapping = {
@@ -80,8 +79,8 @@ def read_excel_data():
     }
     
     monthly_returns_data = []
-    gam_allocations_data = []
-    gam_attribution_data = []
+    ga_allocations_data = []
+    ga_attribution_data = []
     
     # Start from row 3 (row 2 has headers, row 1 has section labels)
     for row in range(3, ws.max_row + 1):
@@ -89,7 +88,6 @@ def read_excel_data():
         if date_val is None:
             continue
             
-        # Parse date
         if isinstance(date_val, datetime):
             date_str = date_val.strftime('%Y-%m-%d')
         elif isinstance(date_val, str):
@@ -111,10 +109,10 @@ def read_excel_data():
                 return None
         
         # Extract monthly returns data (columns 2-9)
-        gam_returns_gross = safe_float_convert(ws.cell(row=row, column=2).value)
-        # Calculate GAM Returns (Net) by subtracting the management fee (0.75% annually = 0.0625% monthly)
-        monthly_fee = 0.0075 / 12  # 0.75% annual fee converted to monthly
-        gam_returns_net = gam_returns_gross - monthly_fee if gam_returns_gross is not None else None
+        ga_returns_gross = safe_float_convert(ws.cell(row=row, column=2).value)
+        # Calculate GA Returns (Net) by subtracting the management fee (0.75% annually = 0.0625% monthly)
+        monthly_fee = 0.0075 / 12
+        ga_returns_net = ga_returns_gross - monthly_fee if ga_returns_gross is not None else None
         
         # Convert percentage values to decimal (divide by 100) for consistency
         acwi = safe_float_convert(ws.cell(row=row, column=4).value)
@@ -131,8 +129,8 @@ def read_excel_data():
         
         monthly_returns_data.append({
             'date': date_str,
-            'gam_returns_gross': gam_returns_gross,
-            'gam_returns_net': gam_returns_net,
+            'ga_returns_gross': ga_returns_gross,
+            'ga_returns_net': ga_returns_net,
             'acwi': acwi,
             'agg': agg,
             'spy': spy,
@@ -141,30 +139,30 @@ def read_excel_data():
             'portfolio_70_30': port_70_30
         })
         
-        # Extract GAM allocation data (columns 10-17)
-        allocation_columns = [10, 11, 12, 13, 14, 15, 16, 17]  # PDBC, VWO, IAU, VEA, SPY, SPTL, VNQ, USFR
+        # Extract GA allocation data (columns 10-17)
+        allocation_columns = [10, 11, 12, 13, 14, 15, 16, 17]
         for col in allocation_columns:
-            asset_symbol = ws.cell(row=2, column=col).value  # Get symbol from header row
+            asset_symbol = ws.cell(row=2, column=col).value
             allocation_value = safe_float_convert(ws.cell(row=row, column=col).value)
             
             if asset_symbol and allocation_value is not None:
                 asset_name = asset_mapping.get(asset_symbol, asset_symbol)
-                gam_allocations_data.append({
+                ga_allocations_data.append({
                     'date': date_str,
                     'asset_symbol': asset_symbol,
                     'asset_name': asset_name,
                     'allocation_percentage': allocation_value
                 })
         
-        # Extract GAM attribution data (columns 18-25)
-        attribution_columns = [18, 19, 20, 21, 22, 23, 24, 25]  # Same assets, attribution values
+        # Extract GA attribution data (columns 18-25)
+        attribution_columns = [18, 19, 20, 21, 22, 23, 24, 25]
         for col in attribution_columns:
-            asset_symbol = ws.cell(row=2, column=col).value  # Get symbol from header row
+            asset_symbol = ws.cell(row=2, column=col).value
             attribution_value = safe_float_convert(ws.cell(row=row, column=col).value)
             
             if asset_symbol and attribution_value is not None:
                 asset_name = asset_mapping.get(asset_symbol, asset_symbol)
-                gam_attribution_data.append({
+                ga_attribution_data.append({
                     'date': date_str,
                     'asset_symbol': asset_symbol,
                     'asset_name': asset_name,
@@ -172,8 +170,8 @@ def read_excel_data():
                 })
     
     return (pd.DataFrame(monthly_returns_data), 
-            pd.DataFrame(gam_allocations_data), 
-            pd.DataFrame(gam_attribution_data))
+            pd.DataFrame(ga_allocations_data), 
+            pd.DataFrame(ga_attribution_data))
 
 def annualized_return(returns, periods):
     if len(returns) < periods:
@@ -217,11 +215,10 @@ def ytd_return(returns, dates):
         return None
     return (1 + ytd_data).prod() - 1
 
-# Store data in database
-def store_all_data(conn, monthly_returns_df, gam_allocations_df, gam_attribution_df):
+def store_all_data(conn, monthly_returns_df, ga_allocations_df, ga_attribution_df):
     monthly_returns_df.to_sql('monthly_returns', conn, if_exists='replace', index=False)
-    gam_allocations_df.to_sql('gam_allocations', conn, if_exists='replace', index=False)
-    gam_attribution_df.to_sql('gam_attribution', conn, if_exists='replace', index=False)
+    ga_allocations_df.to_sql('ga_allocations', conn, if_exists='replace', index=False)
+    ga_attribution_df.to_sql('ga_attribution', conn, if_exists='replace', index=False)
 
 def calculate_benchmark_performance(conn, monthly_returns_df):
     df = monthly_returns_df.copy()
@@ -229,7 +226,7 @@ def calculate_benchmark_performance(conn, monthly_returns_df):
     df = df.sort_values('date').dropna()
     
     portfolios = {
-        'GAM': 'gam_returns_net',
+        'GA': 'ga_returns_net',
         '60/40': 'portfolio_60_40', 
         '70/30': 'portfolio_70_30'
     }
@@ -269,7 +266,7 @@ def calculate_benchmark_performance(conn, monthly_returns_df):
 def get_trailing_12m_allocations_chart_data(conn, months=12):
     query = '''
     SELECT date, asset_name, allocation_percentage
-    FROM gam_allocations 
+    FROM ga_allocations 
     ORDER BY date DESC, asset_name
     LIMIT ?
     '''
@@ -289,7 +286,7 @@ def get_trailing_12m_allocations_chart_data(conn, months=12):
 def get_attribution_chart_data(conn, months=12):
     query = '''
     SELECT date, asset_name, attribution_value
-    FROM gam_attribution 
+    FROM ga_attribution 
     ORDER BY date DESC, asset_name
     LIMIT ?
     '''
@@ -311,10 +308,10 @@ def main():
     conn = create_database()
     
     print("Reading Excel data...")
-    monthly_returns_df, gam_allocations_df, gam_attribution_df = read_excel_data()
+    monthly_returns_df, ga_allocations_df, ga_attribution_df = read_excel_data()
     
     print("Storing data...")
-    store_all_data(conn, monthly_returns_df, gam_allocations_df, gam_attribution_df)
+    store_all_data(conn, monthly_returns_df, ga_allocations_df, ga_attribution_df)
     
     print("Calculating benchmark performance...")
     calculate_benchmark_performance(conn, monthly_returns_df)

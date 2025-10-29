@@ -10,7 +10,6 @@ import os
 import base64
 from io import BytesIO
 
-# PostgreSQL imports with error handling
 try:
     from sqlalchemy import create_engine, text
     import psycopg2
@@ -18,27 +17,28 @@ try:
 except ImportError:
     POSTGRES_AVAILABLE = False
 
-# Configure Streamlit page
 st.set_page_config(
     page_title="Strategy Fact Sheet",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour, then auto-refresh
+# Configure default font for all plots
+import plotly.io as pio
+pio.templates.default = "plotly_white"
+pio.templates["plotly_white"].layout.font.family = "Merriweather, serif"
+
+@st.cache_data(ttl=3600)
 def load_data():
     """Load all data from the database (PostgreSQL primary, SQLite local fallback)"""
     
-    # Check if we have a database connection string (indicates cloud deployment)
     db_url = get_db_connection()
     
-    # Add database type to cache key to prevent cross-contamination
     if db_url and POSTGRES_AVAILABLE:
         cache_key = f"postgres_{hash(db_url) % 10000}"
     else:
         cache_key = "sqlite_local"
     
-    # Force cache invalidation if database type changes
     if 'last_db_type' not in st.session_state:
         st.session_state.last_db_type = cache_key
     elif st.session_state.last_db_type != cache_key:
@@ -51,32 +51,27 @@ def load_data():
         except Exception as e:
             st.error(f"❌ PostgreSQL connection failed: {str(e)}")
             st.error("Please check your database connection in Streamlit secrets.")
-            # Don't fallback in cloud - show the error instead
             raise e
     elif POSTGRES_AVAILABLE:
-        # Try local PostgreSQL if secrets exist locally
         try:
             return load_data_postgres()
         except Exception as e:
             st.warning(f"PostgreSQL unavailable: {str(e)}. Using local SQLite.")
             return load_data_sqlite()
     else:
-        # No PostgreSQL available, use SQLite
         return load_data_sqlite()
 
 def get_db_connection():
     """Get database connection string from secrets"""
     try:
-        # Streamlit Cloud secrets (primary for deployment)
         if hasattr(st, 'secrets') and 'db_url' in st.secrets:
             return st.secrets['db_url']
         
-        # Local development with secrets.toml
         try:
             import toml
             if os.path.exists('secrets.toml'):
                 secrets = toml.load('secrets.toml')
-                db_url = secrets.get('db_url')
+                db_url = secrets.get('database', {}).get('db_url')
                 if db_url:
                     return db_url
         except ImportError:
@@ -84,7 +79,7 @@ def get_db_connection():
         
         return None
     except Exception as e:
-        st.error(f"Error accessing secrets: {e}")
+        # Suppress error display for missing secrets (expected in development)
         return None
 
 def load_data_postgres():
@@ -96,41 +91,32 @@ def load_data_postgres():
     try:
         engine = create_engine(db_url, connect_args={"sslmode": "require"})
         
-        # Test connection first
         with engine.connect() as test_conn:
             test_conn.execute(text("SELECT 1"))
         
-        # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", engine)
         
-        # Get most recent GA allocations (for current allocation display)
-        current_gam_allocations = pd.read_sql_query("""
-            SELECT * FROM gam_allocations 
-            WHERE date = (SELECT MAX(date) FROM gam_allocations)
+        current_ga_allocations = pd.read_sql_query("""
+            SELECT * FROM ga_allocations 
+            WHERE date = (SELECT MAX(date) FROM ga_allocations)
             ORDER BY asset_symbol
         """, engine)
         
-        # Get historical allocations (for trailing 12M analysis)
-        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations ORDER BY date, asset_symbol", engine)
-        
-        # Get historical attribution (for attribution analysis)
-        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution ORDER BY date, asset_symbol", engine)
-        
+        historical_allocations = pd.read_sql_query("SELECT * FROM ga_allocations ORDER BY date, asset_symbol", engine)
+        historical_attribution = pd.read_sql_query("SELECT * FROM ga_attribution ORDER BY date, asset_symbol", engine)
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", engine)
         
-        # Use all historical data for trailing 12 months view (will be filtered in chart functions)
         trailing_12m_allocations = historical_allocations.copy()
         trailing_12m_attribution = historical_attribution.copy()
         
-        # Convert date columns
-        for df in [monthly_returns, current_gam_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
+        for df in [monthly_returns, current_ga_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
             if 'date' in df.columns:
                 df['date'] = pd.to_datetime(df['date'])
         
         return {
             'monthly_returns': monthly_returns,
-            'gam_allocations': current_gam_allocations,
-            'gam_attribution': historical_attribution,
+            'ga_allocations': current_ga_allocations,
+            'ga_attribution': historical_attribution,
             'benchmark_performance': benchmark_performance,
             'trailing_12m_allocations': trailing_12m_allocations,
             'trailing_12m_attribution': trailing_12m_attribution
@@ -152,37 +138,29 @@ def load_data_sqlite():
     conn = sqlite3.connect('portfolio_data.db')
     
     try:
-        # Load all tables
         monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", conn)
         
-        # Get most recent GA allocations (for current allocation display)
-        current_gam_allocations = pd.read_sql_query("""
-            SELECT * FROM gam_allocations 
-            WHERE date = (SELECT MAX(date) FROM gam_allocations)
+        current_ga_allocations = pd.read_sql_query("""
+            SELECT * FROM ga_allocations 
+            WHERE date = (SELECT MAX(date) FROM ga_allocations)
             ORDER BY asset_symbol
         """, conn)
         
-        # Get historical allocations (for trailing 12M analysis)
-        historical_allocations = pd.read_sql_query("SELECT * FROM gam_allocations ORDER BY date, asset_symbol", conn)
-        
-        # Get historical attribution (for attribution analysis)
-        historical_attribution = pd.read_sql_query("SELECT * FROM gam_attribution ORDER BY date, asset_symbol", conn)
-        
+        historical_allocations = pd.read_sql_query("SELECT * FROM ga_allocations ORDER BY date, asset_symbol", conn)
+        historical_attribution = pd.read_sql_query("SELECT * FROM ga_attribution ORDER BY date, asset_symbol", conn)
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", conn)
         
-        # Use historical data for trailing 12 months view (completed months only)
         trailing_12m_allocations = historical_allocations.copy()
         trailing_12m_attribution = historical_attribution.copy()
         
-        # Convert date columns
-        for df in [monthly_returns, current_gam_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
+        for df in [monthly_returns, current_ga_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
             if 'date' in df.columns:
                 df['date'] = pd.to_datetime(df['date'])
         
         return {
             'monthly_returns': monthly_returns,
-            'gam_allocations': current_gam_allocations,
-            'gam_attribution': historical_attribution,
+            'ga_allocations': current_ga_allocations,
+            'ga_attribution': historical_attribution,
             'benchmark_performance': benchmark_performance,
             'trailing_12m_allocations': trailing_12m_allocations,
             'trailing_12m_attribution': trailing_12m_attribution
@@ -196,8 +174,8 @@ def create_empty_data_structure():
     empty_df = pd.DataFrame()
     return {
         'monthly_returns': empty_df,
-        'gam_allocations': empty_df,
-        'gam_attribution': empty_df,
+        'ga_allocations': empty_df,
+        'ga_attribution': empty_df,
         'benchmark_performance': empty_df,
         'trailing_12m_allocations': empty_df,
         'trailing_12m_attribution': empty_df
@@ -208,18 +186,14 @@ def create_growth_chart(data):
     df = data['monthly_returns'].copy()
     df['date'] = pd.to_datetime(df['date'])
     
-    # Calculate cumulative growth starting from $100,000
     initial_investment = 100000
     
-    # GA strategy growth
-    df['ga_cumulative'] = initial_investment * (1 + df['gam_returns_net']).cumprod()
+    df['ga_cumulative'] = initial_investment * (1 + df['ga_returns_net']).cumprod()
     
-    # Use actual 60/40 portfolio returns from database instead of approximation
     df['benchmark_60_40'] = initial_investment * (1 + df['portfolio_60_40']).cumprod()
     
     fig = go.Figure()
     
-    # Add GA strategy line
     fig.add_trace(go.Scatter(
         x=df['date'],
         y=df['ga_cumulative'],
@@ -229,7 +203,6 @@ def create_growth_chart(data):
         hovertemplate='Date: %{x}<br>Value: $%{y:,.0f}<extra></extra>'
     ))
 
-    # Add Global 60/40 benchmark
     fig.add_trace(go.Scatter(
         x=df['date'],
         y=df['benchmark_60_40'],
@@ -237,7 +210,7 @@ def create_growth_chart(data):
         name='Global 60/40',
         line=dict(color='#6b7280', width=2),  # Grey
         hovertemplate='Date: %{x}<br>Value: $%{y:,.0f}<extra></extra>'
-    ))    # Create dynamic date range for title
+    ))   
     start_date = df['date'].min().strftime('%m/%d/%Y')
     end_date = df['date'].max().strftime('%m/%d/%Y')
     
@@ -276,11 +249,9 @@ def create_growth_chart(data):
 
 def create_trailing_12m_allocations_chart(data):
     """Create Trailing 12 Month Allocations stacked bar chart"""
-    # Use trailing_12m_allocations data which has the proper historical monthly data
     df = data['trailing_12m_allocations'].copy()
     
     if df.empty:
-        # Create empty chart with message
         fig = go.Figure()
         fig.add_annotation(
             text="No allocation data available",
@@ -296,46 +267,32 @@ def create_trailing_12m_allocations_chart(data):
         )
         return fig
     
-    # Filter for exactly trailing 12 months from the latest available month-end
     df['date'] = pd.to_datetime(df['date'])
     latest_date = df['date'].max()
     
-    # Handle case where latest_date is NaT (no valid dates)
     if pd.isna(latest_date):
-        # If no valid dates, just use all available data
         pass
     else:
-        # Get the latest month-year period
         latest_period = pd.Period(latest_date, freq='M')
         
-        # Calculate exactly 12 months back from the latest period
-        # For Sept 2025: Include Oct 2024, Nov 2024, ..., Aug 2025, Sep 2025 (12 months)
-        periods_to_include = [latest_period - i for i in range(11, -1, -1)]  # Reverse order for chronological
+        periods_to_include = [latest_period - i for i in range(11, -1, -1)] 
         
-        # Filter data to only include these specific month-year periods
         df['period'] = df['date'].dt.to_period('M')
         df = df[df['period'].isin(periods_to_include)]
     
-    # Group by period and asset to get one entry per month-year combination
     monthly_df = df.groupby(['period', 'asset_name'])['allocation_percentage'].last().reset_index()
     
-    # Convert period back to month_end for display and sort chronologically
     monthly_df['month_end'] = monthly_df['period'].dt.end_time
     monthly_df = monthly_df.sort_values('period')
     
-    # Pivot data for stacked bar chart
     pivot_df = monthly_df.pivot(index='month_end', columns='asset_name', values='allocation_percentage')
     
-    # Fill NaN values with 0
     pivot_df = pivot_df.fillna(0)
     
-    # Convert to percentages (historical data is stored as decimals, so multiply by 100)
     pivot_df = pivot_df * 100
     
-    # Create month labels for x-axis
     pivot_df.index = pivot_df.index.strftime('%b %Y')
     
-    # Create stacked bar chart
     fig = go.Figure()
     
     colors = {
@@ -349,13 +306,11 @@ def create_trailing_12m_allocations_chart(data):
         'Cash': '#001f3f' 
     }
     
-    # Sort columns to match the stacking order from the screenshots
     column_order = ['Commodities', 'EM_Stocks', 'Gold', 'Intl_Dev_Stocks', 'SP500', 'US_LT_Treas', 'US_REITs', 'Cash']
     available_columns = [col for col in column_order if col in pivot_df.columns]
     other_columns = [col for col in pivot_df.columns if col not in column_order]
     final_columns = available_columns + other_columns
     
-    # Create asset name mapping for consistent display names
     asset_name_map = {
         'SPDR Portfolio S&P 500 ETF': 'S&P 500',
         'iShares Gold Trust': 'Gold',
@@ -388,15 +343,15 @@ def create_trailing_12m_allocations_chart(data):
         title='Trailing 12 Month Allocations',
         xaxis_title='Month',
         yaxis_title='Allocation (%)',
-        barmode='stack',  # Enable stacked bars
+        barmode='stack', 
         hovermode='x unified',
         height=500,
         showlegend=True,
         legend=dict(orientation="v", yanchor="middle", y=0.5, xanchor="left", x=1.02),
         plot_bgcolor='white',
         paper_bgcolor='white',
-        yaxis=dict(range=[0, 100]),  # Set y-axis to show 0-100%
-        xaxis=dict(tickangle=45)  # Rotate month labels for better readability
+        yaxis=dict(range=[0, 100]),  
+        xaxis=dict(tickangle=45)  
     )
     
     return fig
@@ -405,10 +360,8 @@ def create_monthly_returns_chart(data):
     """Create Monthly Returns chart with rolling volatility"""
     df = data['monthly_returns'].copy()
     
-    # Calculate rolling volatility (12-month)
-    df['rolling_volatility'] = df['gam_returns_net'].rolling(window=12).std() * np.sqrt(12)
+    df['rolling_volatility'] = df['ga_returns_net'].rolling(window=12).std() * np.sqrt(12)
     
-    # Create subplots
     fig = make_subplots(
         rows=2, cols=1,
         subplot_titles=('Monthly Returns (%)', 'Rolling 12-Month Volatility (%)'),
@@ -416,12 +369,11 @@ def create_monthly_returns_chart(data):
         row_heights=[0.7, 0.3]
     )
     
-    # Monthly returns bar chart
-    colors = ['green' if x >= 0 else 'red' for x in df['gam_returns_net']]
+    colors = ['green' if x >= 0 else 'red' for x in df['ga_returns_net']]
     fig.add_trace(
         go.Bar(
             x=df['date'],
-            y=df['gam_returns_net'] * 100,
+            y=df['ga_returns_net'] * 100,
             name='Monthly Returns',
             marker_color=colors,
             hovertemplate='Date: %{x}<br>Return: %{y:.2f}%<extra></extra>'
@@ -429,7 +381,6 @@ def create_monthly_returns_chart(data):
         row=1, col=1
     )
     
-    # Volatility line chart
     fig.add_trace(
         go.Scatter(
             x=df['date'],
@@ -454,17 +405,14 @@ def create_benchmark_performance_chart(data):
     """Create Benchmark Performance comparison with blue theme and professional styling"""
     df = data['benchmark_performance'].copy()
     
-    # Portfolio-specific colors (consistent across all charts)
     portfolio_colors = {
-        'GAM': "#1e3a8a",      # Dark blue for GAM
+        'GA': "#1e3a8a",       # Dark blue for GA
         '60/40': "#15803d",    # Dark green for 60/40
         '70/30': "#6b7280"     # Gray for 70/30
     }
     
-    # Time period colors for the returns chart legend
     time_period_colors = ["#0B3C7D", "#1D5BBF", "#3C82F6", "#93B4FF"]  # YTD, 1Y, 5Y, SI
     
-    # Create 2x2 subplots with proper spacing
     fig = make_subplots(
         rows=2, cols=2,
         subplot_titles=('Returns Comparison (%)', 'Risk Metrics', 'Risk-Adjusted Returns', 'Beta to S&P 500'),
@@ -474,10 +422,8 @@ def create_benchmark_performance_chart(data):
     
     portfolios = df['portfolio'].tolist()
     
-    # Map portfolio names for display (GAM -> GA)
-    portfolio_display_names = ['GA' if p == 'GAM' else p for p in portfolios]
+    portfolio_display_names = ['GA' if p == 'GA' else p for p in portfolios]
     
-    # Returns comparison (grouped bars) - only these show in legend
     metrics_data = [
         ('ytd', 'YTD', time_period_colors[0]),
         ('one_year', '1Y', time_period_colors[1]),
@@ -496,13 +442,12 @@ def create_benchmark_performance_chart(data):
                 text=[f'{v:.1f}%' for v in values],
                 textposition='outside',
                 textfont=dict(color=color, size=11),
-                showlegend=True,  # Only returns traces show in legend
+                showlegend=True,
                 hovertemplate="<b>%{x}</b><br>%{fullData.name}: %{y:.2f}%<extra></extra>"
             ),
             row=1, col=1
         )
     
-    # Risk metrics (Standard Deviation) - portfolio-specific colors
     risk_values = df['standard_deviation'] * 100
     portfolio_risk_colors = [portfolio_colors[portfolio] for portfolio in portfolios]
     fig.add_trace(
@@ -556,7 +501,6 @@ def create_benchmark_performance_chart(data):
         row=2, col=2
     )
     
-    # Apply styling and layout
     fig.update_layout(
         template="simple_white",
         paper_bgcolor="white",
@@ -565,7 +509,6 @@ def create_benchmark_performance_chart(data):
         title_text="Portfolio Benchmark Performance Comparison",
         title_font=dict(size=18),
         
-        # Global legend above the charts
         legend=dict(
             orientation="h",
             x=0.5,
@@ -575,10 +518,8 @@ def create_benchmark_performance_chart(data):
             title=""
         ),
         
-        # Layout margins
         margin=dict(l=60, r=30, t=60, b=60),
         
-        # Grouped bar settings for returns chart
         barmode="group",
         bargap=0.18,
         bargroupgap=0.12,
@@ -590,7 +531,7 @@ def create_benchmark_performance_chart(data):
     
     # Update y-axes with fixed ranges, titles, and styling
     fig.update_yaxes(
-        range=[0, 18],  # Increased range to accommodate text labels above bars
+        range=[0, 18],
         title_text="Returns (%)",
         tickformat=".1f",
         gridcolor="rgba(15,23,42,0.08)",
@@ -638,7 +579,6 @@ def create_benchmark_performance_chart(data):
         selector=dict(type="bar")
     )
     
-    # Style subplot titles
     fig.update_annotations(font=dict(size=14))
     
     return fig
@@ -648,7 +588,6 @@ def create_attribution_chart(data):
     df = data['trailing_12m_attribution'].copy()
     
     if df.empty:
-        # Create empty chart with message
         fig = go.Figure()
         fig.add_annotation(
             text="No attribution data available",
@@ -670,7 +609,6 @@ def create_attribution_chart(data):
     
     # Handle case where latest_date is NaT (no valid dates)
     if pd.isna(latest_date):
-        # If no valid dates, just use all available data
         pass
     else:
         # Get the latest month-year period
@@ -691,12 +629,10 @@ def create_attribution_chart(data):
     pivot_df = pivot_df.pivot(index='month_year', columns='asset_name', values='attribution_value')
     pivot_df = pivot_df.fillna(0)
     
-    # Convert to percentages 
     # Attribution data is stored as decimals (e.g., 0.00281 = 0.281%)
     # So multiply by 100 to get percentage values for display
     pivot_df = pivot_df * 100
     
-    # Create stacked bar chart
     fig = go.Figure()
     
     # Color palette for assets (matching the allocation chart)
@@ -711,7 +647,6 @@ def create_attribution_chart(data):
         'Cash': '#001f3f' 
     }
     
-    # Order columns same as allocation chart
     column_order = ['Commodities', 'EM_Stocks', 'Gold', 'Intl_Dev_Stocks', 'SP500', 'US_LT_Treas', 'US_REITs', 'Cash']
     available_columns = [col for col in column_order if col in pivot_df.columns]
     other_columns = [col for col in pivot_df.columns if col not in column_order]
@@ -733,7 +668,6 @@ def create_attribution_chart(data):
         ordered_months = list(pivot_df.index)
     
     for asset in final_columns:
-        # Defensive programming: ensure asset is a string
         asset_str = str(asset) if pd.notna(asset) else 'Unknown'
         
         fig.add_trace(go.Bar(
@@ -756,7 +690,6 @@ def create_attribution_chart(data):
         paper_bgcolor='white'
     )
     
-    # Add horizontal line at zero
     fig.add_hline(y=0, line_dash="dash", line_color="black", line_width=1)
     
     return fig
@@ -765,12 +698,11 @@ def calculate_ga_performance_metrics(data_dict):
     """Get GA performance metrics from database and calculate 3-year return"""
     benchmark_data = data_dict['benchmark_performance']
     monthly_returns_df = data_dict['monthly_returns']
+
+    ga_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GA']
     
-    # Get GAM performance metrics from database
-    gam_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GAM']
-    
-    if not gam_benchmark.empty:
-        gam_data = gam_benchmark.iloc[0]
+    if not ga_benchmark.empty:
+        ga_data = ga_benchmark.iloc[0]
         
         # Calculate 3-year return from monthly returns data
         df = monthly_returns_df.copy()
@@ -779,27 +711,26 @@ def calculate_ga_performance_metrics(data_dict):
         three_years_ago = current_date - timedelta(days=3*365.25)
         three_year_data = df[df['date'] >= three_years_ago]
         
-        if len(three_year_data) >= 24:  # Ensure we have at least 2 years of data
-            three_year_total_return = (1 + three_year_data['gam_returns_net']).prod() - 1
+        if len(three_year_data) >= 24:
+            three_year_total_return = (1 + three_year_data['ga_returns_net']).prod() - 1
             years = len(three_year_data) / 12
             three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
         else:
             three_year_annualized = 0.0
         
         return {
-            'ytd': gam_data['ytd'],
-            'one_year': gam_data['one_year'],
+            'ytd': ga_data['ytd'],
+            'one_year': ga_data['one_year'],
             'three_year': three_year_annualized,  # Calculated from monthly returns
-            'five_year': gam_data['five_year'],
-            'since_inception': gam_data['since_inception'],
-            'standard_deviation': gam_data['standard_deviation'],
-            'sharpe_ratio': gam_data['sharpe_ratio'],
-            'beta_to_sp500': gam_data['beta_to_sp500'],
+            'five_year': ga_data['five_year'],
+            'since_inception': ga_data['since_inception'],
+            'standard_deviation': ga_data['standard_deviation'],
+            'sharpe_ratio': ga_data['sharpe_ratio'],
+            'beta_to_sp500': ga_data['beta_to_sp500'],
             'max_drawdown': 0.0,  # Not stored in database yet, could be added later
             'downside_deviation': 0.0  # Not stored in database yet, could be added later
         }
     else:
-        # Fallback to default values if no data found
         return {
             'ytd': 0.0,
             'one_year': 0.0,
@@ -815,10 +746,9 @@ def calculate_ga_performance_metrics(data_dict):
 
 def create_allocation_pie_chart(data):
     """Create current allocation pie chart"""
-    df = data['gam_allocations'].copy()  # Use current GAM allocations
+    df = data['ga_allocations'].copy()  # Use current GA allocations
     
     if df.empty:
-        # Create empty chart with message
         fig = go.Figure()
         fig.add_annotation(
             text="No allocation data available",
@@ -832,11 +762,9 @@ def create_allocation_pie_chart(data):
         )
         return fig
     
-    # Get latest allocation
     df['date'] = pd.to_datetime(df['date'])
     latest_date = df['date'].max()
     
-    # Create asset name mapping for cleaner display
     asset_name_map = {
         'SPDR Portfolio S&P 500 ETF': 'U.S. Stocks (S&P 500)',
         'iShares Gold Trust': 'Gold',
@@ -863,13 +791,11 @@ def create_allocation_pie_chart(data):
         date_str = latest_date.strftime("%B %Y")
         latest_allocation = df[df['date'] == latest_date]
     
-    # Apply name mapping
     latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
     
     # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
     latest_allocation = latest_allocation.groupby('display_name')['allocation_percentage'].sum().reset_index()
     
-    # Custom blue color scheme for pie chart
     colors = {
         'SP500': '#80c1ff',  
         'Gold': '#4da6ff',   
@@ -879,7 +805,6 @@ def create_allocation_pie_chart(data):
         'EM_Stocks': '#004080', 
         'Commodities': '#003366', 
         'Cash': '#001f3f',
-        # Map display names to colors as well
         'U.S. Stocks (S&P 500)': '#80c1ff',
         'Gold': '#4da6ff',
         'U.S. Real Estate (REITs)': '#337fcc',
@@ -915,156 +840,14 @@ def main():
     # Page config
     st.set_page_config(
         page_title="Strategy Fact Sheet",
-        page_icon="📊",
         layout="wide",
         initial_sidebar_state="collapsed"
     )
     
-    # Custom CSS for RQA blue theme and fact sheet styling
-    st.markdown("""
-    <style>
-    .main {
-        padding-top: 2rem;
-    }
-    
-    /* RQA Blue Color Scheme */
-    :root {
-        --rqa-blue: #0f1419;
-        --rqa-light-blue: #1e3a8a;
-        --rqa-dark-blue: #0f172a;
-        --rqa-accent: #3b82f6;
-        --rqa-text: #0f172a;
-    }
-    
-    /* Header styling */
-    .fact-sheet-header {
-        background: linear-gradient(90deg, var(--rqa-blue) 0%, var(--rqa-light-blue) 100%);
-        color: white;
-        padding: 2rem;
-        border-radius: 10px;
-        margin-bottom: 2rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    }
-    
-    .strategy-title {
-        font-size: 2.5rem;
-        font-weight: bold;
-        margin: 0;
-        text-align: center;
-    }
-    
-    .strategy-subtitle {
-        font-size: 1.2rem;
-        text-align: center;
-        margin-top: 0.5rem;
-        opacity: 0.9;
-    }
-    
-    /* Fact sheet sections */
-    .fact-section {
-        background: white;
-        border: 2px solid var(--rqa-accent);
-        border-radius: 8px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-    
-    .fact-section h3 {
-        color: var(--rqa-blue);
-        border-bottom: 2px solid var(--rqa-accent);
-        padding-bottom: 0.5rem;
-        margin-bottom: 1rem;
-    }
-    
-    .performance-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 1rem;
-        margin-top: 1rem;
-    }
-    
-    .performance-metric {
-        background: linear-gradient(135deg, var(--rqa-light-blue), var(--rqa-accent));
-        color: white;
-        padding: 1rem;
-        border-radius: 8px;
-        text-align: center;
-    }
-    
-    .metric-label {
-        font-size: 0.9rem;
-        opacity: 0.9;
-        margin-bottom: 0.5rem;
-    }
-    
-    .metric-value {
-        font-size: 1.4rem;
-        font-weight: bold;
-    }
-    
-    /* Custom tabs - Pill design with better styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 12px;
-        background-color: #f8fafc;
-        border-radius: 50px;
-        padding: 8px 16px;
-        border: 2px solid #e2e8f0;
-        justify-content: center;
-        margin-bottom: 2rem;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        height: 45px;
-        background-color: transparent;
-        color: #64748b;
-        border-radius: 25px;
-        font-weight: 500;
-        padding: 0 24px;
-        transition: all 0.3s ease;
-        border: 1px solid transparent;
-        font-size: 0.95rem;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #f1f5f9;
-        color: #475569;
-        border: 1px solid #cbd5e1;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background-color: #3b5998;
-        color: white;
-        border: 1px solid #3b5998;
-        box-shadow: 0 2px 8px rgba(59, 89, 152, 0.3);
-    }
-    
-    /* Key facts styling */
-    .key-facts {
-        background: linear-gradient(135deg, #f8fafc, #e2e8f0);
-        border-left: 4px solid var(--rqa-blue);
-        padding: 1rem;
-        border-radius: 4px;
-    }
-    
-    .section-header {
-        color: var(--rqa-blue);
-        font-size: 1.5rem;
-        font-weight: bold;
-        margin-bottom: 1rem;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid var(--rqa-accent);
-    }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Load data
     data = load_data()
     
-    # Calculate key metrics for display
     ga_metrics = calculate_ga_performance_metrics(data)
     
-    # Add logo to sidebar above navigation
     st.sidebar.image("logo.png", width=200)
     st.sidebar.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
     
@@ -1087,16 +870,12 @@ def create_fact_sheet_landing(data, ga_metrics):
     import base64
     import os
     
-    # Read and encode logo
     logo_html = ""
     if os.path.exists("logo.png"):
         with open("logo.png", "rb") as f:
             logo_data = base64.b64encode(f.read()).decode()
             logo_html = f'<img src="data:image/png;base64,{logo_data}" style="width: auto; height: 100px; border-radius: 12px; background: white; padding: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.25);"/>'
-    
-    # Create the professional header with logo on left and strategy name on right
-    
-    # Read and encode globe image for background
+        
     globe_bg = ""
     if os.path.exists("globe.png"):
         with open("globe.png", "rb") as f:
@@ -1128,12 +907,13 @@ def create_fact_sheet_landing(data, ga_metrics):
         <div style="text-align: right; flex-shrink: 0; margin-right: -1rem;">
             <h1 style="
                 margin: 0;
-                font-size: 3.2rem;
+                font-size: 2.5rem;
                 font-weight: 300;
                 letter-spacing: 0.2rem;
                 color: white;
                 line-height: 1.1;
                 text-shadow: 0 3px 6px rgba(0,0,0,0.4);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
             ">GLOBAL ADAPTIVE</h1>
             <div style="
                 width: 280px; 
@@ -1143,11 +923,12 @@ def create_fact_sheet_landing(data, ga_metrics):
             "></div>
             <h2 style="
                 margin: 0;
-                font-size: 2rem;
+                font-size: 1.6rem;
                 font-weight: 300;
                 letter-spacing: 0.3rem;
                 color: white;
                 text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
             ">STRATEGY</h2>
         </div>
     </div>
@@ -1155,18 +936,16 @@ def create_fact_sheet_landing(data, ga_metrics):
 
 
     
-    # Main content layout
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        # Strategy Overview with consistent header format
         st.markdown("""
         <div style="background: #3b5998;
                     color: white;
                     padding: 1rem 2rem;
                     border-radius: 8px;
                     margin-bottom: 1rem;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">STRATEGY OVERVIEW</h2>
+            <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">STRATEGY OVERVIEW</h2>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1178,24 +957,20 @@ def create_fact_sheet_landing(data, ga_metrics):
         Through this evidence-based framework, GA strives to deliver three key benefits: more consistent growth, enhanced stability, and improved capital preservation. The result is a portfolio designed not only to participate in market gains, but also to better withstand periods of stress — an advantage that can compound meaningfully for investors over the long run.
         """)
         
-        # Growth Chart
         st.plotly_chart(create_growth_chart(data), use_container_width=True)
         
-        # Strategy Returns with consistent header format
         st.markdown("""
         <div style="background: #3b5998;
                     color: white;
                     padding: 1rem 2rem;
                     border-radius: 8px;
                     margin-bottom: 1rem;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">STRATEGY RETURNS (Net of Fees)</h2>
+            <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">STRATEGY RETURNS (Net of Fees)</h2>
         </div>
         """, unsafe_allow_html=True)
         
-        # Create the performance table using database data
         benchmark_data = data['benchmark_performance'].copy()
         
-        # Get Global 60/40 metrics from database
         global_6040 = benchmark_data[benchmark_data['portfolio'] == '60/40'].iloc[0] if not benchmark_data.empty else None
         
         # Calculate 3-year return for 60/40 from monthly returns data
@@ -1206,7 +981,7 @@ def create_fact_sheet_landing(data, ga_metrics):
         three_years_ago = current_date - timedelta(days=3*365.25)
         three_year_data = df[df['date'] >= three_years_ago]
         
-        if len(three_year_data) >= 24:  # Ensure we have at least 2 years of data
+        if len(three_year_data) >= 24:
             three_year_total_return_6040 = (1 + three_year_data['portfolio_60_40']).prod() - 1
             years = len(three_year_data) / 12
             three_year_annualized_6040 = (1 + three_year_total_return_6040) ** (1/years) - 1 if years > 0 else 0
@@ -1227,7 +1002,6 @@ def create_fact_sheet_landing(data, ga_metrics):
                               f"{global_6040['since_inception']*100:.1f}%" if global_6040 is not None else "N/A"]
         }
         
-        # Display as a clean table
         df_performance = pd.DataFrame(performance_data)
         st.dataframe(df_performance, hide_index=True, use_container_width=True)
         
@@ -1238,12 +1012,11 @@ def create_fact_sheet_landing(data, ga_metrics):
                     padding: 1rem 2rem;
                     border-radius: 8px;
                     margin-bottom: 1rem;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">RISK MANAGEMENT</h2>
+            <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">RISK MANAGEMENT</h2>
             <p style="color: white; margin: 0.5rem 0 0 0; font-size: 1.1rem; font-style: italic; font-weight: 300;">"Risk Forward Framework"</p>
         </div>
         """, unsafe_allow_html=True)
         
-        # Risk metrics table using database data
         risk_data = {
             'Metric': ['Annualized Volatility', 'Sharpe Ratio (RF=0)', 'Beta (vs. S&P)'],
             'GA': [f"{ga_metrics['standard_deviation']*100:.1f}%", 
@@ -1264,7 +1037,7 @@ def create_fact_sheet_landing(data, ga_metrics):
                     padding: 1rem 2rem;
                     border-radius: 8px;
                     margin-bottom: 1rem;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">PORTFOLIO MANAGEMENT</h2>
+            <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">PORTFOLIO MANAGEMENT</h2>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1291,15 +1064,13 @@ def create_fact_sheet_landing(data, ga_metrics):
             """)
     
     with col2:
-        # Key Facts with enhanced styling
-        # Key Facts with consistent header format
         st.markdown("""
         <div style="background: #3b5998;
                     color: white;
                     padding: 1rem 2rem;
                     border-radius: 8px;
                     margin-bottom: 1rem;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">KEY FACTS</h2>
+            <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">KEY FACTS</h2>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1337,8 +1108,7 @@ def create_fact_sheet_landing(data, ga_metrics):
         </div>
         """, unsafe_allow_html=True)
         
-        # Get current allocation data
-        df = data['gam_allocations'].copy()
+        df = data['ga_allocations'].copy()
         
         if df.empty:
             st.markdown("*No allocation data available*")
@@ -1364,7 +1134,6 @@ def create_fact_sheet_landing(data, ga_metrics):
                 'Commodities': 'Commodities',
                 'Gold': 'Gold',
                 'Cash': 'Cash',
-                # Full ETF name mappings
                 'SPDR Portfolio S&P 500 ETF': 'U.S. Stocks (S&P 500)',
                 'iShares Gold Trust': 'Gold',
                 'Vanguard FTSE Developed Markets ETF': 'International Developed Stocks',
@@ -1372,14 +1141,12 @@ def create_fact_sheet_landing(data, ga_metrics):
                 'Schwab Emerging Markets Equity ETF': 'Emerging Market Stocks',
                 'iShares GSCI Commodity Dynamic Roll Strategy ETF': 'Commodities',
                 'iShares 20+ Year Treasury Bond ETF': 'Cash',
-                # Additional possible variants
                 'iShares Core MSCI Total International Stock ETF': 'International Developed Stocks',
                 'Vanguard Real Estate Index Fund ETF Shares': 'U.S. Real Estate (REITs)',
                 'Schwab Fundamental Emerging Markets Large Company Index Fund': 'Emerging Market Stocks',
                 'Invesco DB Commodity Index Tracking Fund': 'Commodities'
             }
             
-            # Apply name mapping
             latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
             
             # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
@@ -1397,8 +1164,7 @@ def create_fact_sheet_landing(data, ga_metrics):
                 else:
                     allocation_str = f"{allocation:.1f}%"
                 
-                # Enhanced allocation display with progress bars
-                bar_width = int(allocation * 2)  # Scale for visual effect
+                bar_width = int(allocation * 2)
                 st.markdown(f"""
                 <div style="margin-bottom: 1rem;">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
@@ -1442,14 +1208,13 @@ def create_fact_sheet_landing(data, ga_metrics):
 
 
 
-    # Add disclaimer with enhanced styling
     st.markdown("""
     <div style="margin-top: 2rem; 
                 padding: 1rem; 
-                background: linear-gradient(135deg, #f9fafb, #e5e7eb); 
+                background: linear-gradient(135deg,
                 border-radius: 8px; 
                 font-size: 0.85rem; 
-                color: #6b7280; 
+                color:
                 border-left: 4px solid #9ca3af;">
         <strong>Important Disclosures:</strong> This presentation is for informational purposes only. Past performance does not guarantee future results. 
         All investments involve risk of loss. The strategy may not be suitable for all investors. Please consult with a financial advisor before investing.
@@ -1462,7 +1227,6 @@ def create_analytics_dashboard(data, ga_metrics):
     import base64
     import os
     
-    # Read and encode logo
     logo_html = ""
     if os.path.exists("logo.png"):
         with open("logo.png", "rb") as f:
@@ -1471,7 +1235,6 @@ def create_analytics_dashboard(data, ga_metrics):
     
     # Create the professional header with logo on left and analytics name on right
     
-    # Read and encode globe image for background
     globe_bg = ""
     if os.path.exists("globe.png"):
         with open("globe.png", "rb") as f:
@@ -1503,7 +1266,8 @@ def create_analytics_dashboard(data, ga_metrics):
         <div style="text-align: right; flex-shrink: 0; margin-right: -1rem;">
             <h1 style="
                 margin: 0;
-                font-size: 3.2rem;
+                font-family: 'Inter', 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+                font-size: 2.5rem;
                 font-weight: 300;
                 letter-spacing: 0.2rem;
                 color: white;
@@ -1518,7 +1282,8 @@ def create_analytics_dashboard(data, ga_metrics):
             "></div>
             <h2 style="
                 margin: 0;
-                font-size: 2rem;
+                font-family: 'Inter', 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
+                font-size: 1.6rem;
                 font-weight: 300;
                 letter-spacing: 0.3rem;
                 color: white;
@@ -1528,7 +1293,6 @@ def create_analytics_dashboard(data, ga_metrics):
     </div>
     """, unsafe_allow_html=True)
     
-    # Sidebar metrics
     st.sidebar.header("Performance Metrics")
     st.sidebar.metric("YTD Return", f"{ga_metrics['ytd']*100:.2f}%")
     st.sidebar.metric("1-Year Return", f"{ga_metrics['one_year']*100:.2f}%")
@@ -1557,17 +1321,21 @@ def create_analytics_dashboard(data, ga_metrics):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">TARGET PORTFOLIO ALLOCATION</h2>
         </div>
         """, unsafe_allow_html=True)
-        col1, col2 = st.columns([1, 1])
+        
+        # Add some spacing
+        st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
+        
+        col1, col2 = st.columns([1.2, 0.8], gap="large")
         
         with col1:
             st.plotly_chart(create_allocation_pie_chart(data), use_container_width=True)
         
         with col2:
-            # Show allocation table using current GAM data with abbreviated names
-            df = data['gam_allocations'].copy()
+            st.markdown("### Target Allocation Breakdown")
+            # Show allocation table using current GA data with abbreviated names
+            df = data['ga_allocations'].copy()
             
             if df.empty:
-                st.markdown("### Target Allocation Breakdown")
                 st.markdown("*No allocation data available*")
             else:
                 df['date'] = pd.to_datetime(df['date'])
@@ -1579,7 +1347,6 @@ def create_analytics_dashboard(data, ga_metrics):
                 else:
                     latest_allocation = df[df['date'] == latest_date][['asset_name', 'allocation_percentage']].copy()
                 
-                # Create asset name mapping for cleaner display
                 asset_name_map = {
                     'SPDR Portfolio S&P 500 ETF': 'U.S. Stocks (S&P 500)',
                     'iShares Gold Trust': 'Gold',
@@ -1598,19 +1365,16 @@ def create_analytics_dashboard(data, ga_metrics):
                     'Gold': 'Gold'
                 }
                 
-                # Apply name mapping
                 latest_allocation['display_name'] = latest_allocation['asset_name'].map(asset_name_map).fillna(latest_allocation['asset_name'])
                 
                 # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
                 latest_allocation = latest_allocation.groupby('display_name')['allocation_percentage'].sum().reset_index()
                 
-                # Create final dataframe with abbreviated names
                 display_allocation = latest_allocation[['display_name', 'allocation_percentage']].copy()
                 display_allocation = display_allocation.sort_values('allocation_percentage', ascending=False)
                 display_allocation.columns = ['Asset Class', 'Allocation (%)']
                 display_allocation['Allocation (%)'] = (display_allocation['Allocation (%)'] * 100).round(2)  # Convert to percentage
                 
-                st.markdown("### Target Allocation Breakdown")
                 st.dataframe(display_allocation, width='stretch', hide_index=True)
     
     with tab2:
@@ -1639,18 +1403,17 @@ def create_analytics_dashboard(data, ga_metrics):
         """, unsafe_allow_html=True)
         st.plotly_chart(create_monthly_returns_chart(data), use_container_width=True)
         
-        # Summary statistics
         returns_data = data['monthly_returns']
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Average Monthly Return", f"{returns_data['gam_returns_net'].mean()*100:.2f}%")
+            st.metric("Average Monthly Return", f"{returns_data['ga_returns_net'].mean()*100:.2f}%")
         with col2:
-            st.metric("Best Month", f"{returns_data['gam_returns_net'].max()*100:.2f}%")
+            st.metric("Best Month", f"{returns_data['ga_returns_net'].max()*100:.2f}%")
         with col3:
-            st.metric("Worst Month", f"{returns_data['gam_returns_net'].min()*100:.2f}%")
+            st.metric("Worst Month", f"{returns_data['ga_returns_net'].min()*100:.2f}%")
         with col4:
-            st.metric("Win Rate", f"{(returns_data['gam_returns_net'] > 0).mean()*100:.1f}%")
+            st.metric("Win Rate", f"{(returns_data['ga_returns_net'] > 0).mean()*100:.1f}%")
     
     with tab4:
         st.markdown("""
@@ -1678,7 +1441,6 @@ def create_analytics_dashboard(data, ga_metrics):
         """, unsafe_allow_html=True)
         st.plotly_chart(create_attribution_chart(data), use_container_width=True)
         
-        # Attribution summary
         attribution_data = data['trailing_12m_attribution']
         attribution_data['date'] = pd.to_datetime(attribution_data['date'])
         latest_date = attribution_data['date'].max()

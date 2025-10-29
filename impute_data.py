@@ -89,7 +89,7 @@ def get_portfolio_return(weights, returns_dict):
 
 portfolio_returns = {name: get_portfolio_return(w, returns_dict) for name, w in portfolios.items()}
 
-wb = openpyxl.load_workbook('GAM_new copy.xlsx')
+wb = openpyxl.load_workbook('GA_new copy.xlsx')
 ws = wb.active
 
 col_map = {
@@ -137,5 +137,5 @@ for date in returns_dict['ACWI'].index:
         if val is not None and not (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
             ws.cell(row=row, column=col_map[p]).value = round(val, 4)
 
-wb.save('GAM_new copy.xlsx')
+wb.save('GA_new copy.xlsx')
 print("Excel file updated successfully!")

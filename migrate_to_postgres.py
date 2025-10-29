@@ -15,7 +15,7 @@ def get_postgres_connection():
         import toml
         if os.path.exists('secrets.toml'):
             secrets = toml.load('secrets.toml')
-            db_url = secrets['db_url']
+            db_url = secrets['database']['db_url']
             print(f"✅ Successfully loaded connection from secrets.toml")
             return db_url
         else:
@@ -40,7 +40,6 @@ def check_sqlite_database():
         conn = sqlite3.connect('portfolio_data.db')
         cursor = conn.cursor()
         
-        # Get list of tables
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';")
         tables = cursor.fetchall()
         
@@ -90,7 +89,6 @@ def migrate_table(table_name, sqlite_conn, postgres_engine):
     try:
         print(f"📊 Migrating table: {table_name}")
         
-        # Read data from SQLite
         df = pd.read_sql_query(f"SELECT * FROM {table_name}", sqlite_conn)
         print(f"   - Read {len(df)} rows from SQLite")
         
@@ -104,9 +102,8 @@ def migrate_table(table_name, sqlite_conn, postgres_engine):
                 df[date_col] = pd.to_datetime(df[date_col])
                 print(f"   - Converted {date_col} to datetime")
             except:
-                pass  # Skip if conversion fails
+                pass
         
-        # Write to PostgreSQL (replace existing data)
         df.to_sql(
             table_name, 
             postgres_engine, 
@@ -128,7 +125,6 @@ def verify_migration(postgres_engine):
     try:
         print("\n🔍 Verifying migration...")
         
-        # Get list of tables from PostgreSQL
         with postgres_engine.connect() as conn:
             result = conn.execute(text("""
                 SELECT table_name 
@@ -141,7 +137,6 @@ def verify_migration(postgres_engine):
             
             print(f"✅ Found {len(tables)} tables in PostgreSQL:")
             for table_name in tables:
-                # Get row count
                 count_result = conn.execute(text(f"SELECT COUNT(*) FROM {table_name}"))
                 count = count_result.fetchone()[0]
                 print(f"   ✅ {table_name}: {count} rows")
@@ -157,18 +152,15 @@ def main():
     print("🚀 SQLite to PostgreSQL (Supabase) Migration")
     print("=" * 55)
     
-    # Step 1: Check SQLite database
     print("Step 1: Checking SQLite database...")
     if not check_sqlite_database():
         sys.exit(1)
     
-    # Step 2: Get PostgreSQL connection
     print("\nStep 2: Getting PostgreSQL connection...")
     postgres_url = get_postgres_connection()
     if not postgres_url:
         sys.exit(1)
     
-    # Step 3: Test PostgreSQL connection
     print("\nStep 3: Testing PostgreSQL connection...")
     if not test_postgres_connection(postgres_url):
         print("\n💡 Common solutions:")
@@ -177,11 +169,9 @@ def main():
         print("   - Verify your network allows connections to Supabase")
         sys.exit(1)
     
-    # Step 4: Perform migration
     print("\nStep 4: Starting data migration...")
     
     try:
-        # Connect to databases
         sqlite_conn = sqlite3.connect('portfolio_data.db')
         postgres_engine = create_engine(postgres_url)
         
@@ -192,17 +182,14 @@ def main():
         
         print(f"\n📦 Migrating {len(tables)} tables...")
         
-        # Migrate each table
         successful_migrations = 0
         for table_name in tables:
             if migrate_table(table_name, sqlite_conn, postgres_engine):
                 successful_migrations += 1
         
-        # Close connections
         sqlite_conn.close()
         postgres_engine.dispose()
         
-        # Step 5: Verify migration
         print("\nStep 5: Verifying migration...")
         postgres_engine = create_engine(postgres_url)
         verify_migration(postgres_engine)

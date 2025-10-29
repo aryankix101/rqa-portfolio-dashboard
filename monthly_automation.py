@@ -8,9 +8,9 @@ Runs monthly data pipeline:
 4. PostgreSQL migration
 
 Usage:
-    python monthly_automation.py          # Run once manually
-    python monthly_automation.py --daemon # Background scheduler  
-    python monthly_automation.py --now    # Run immediately
+    python monthly_automation.py
+    python monthly_automation.py --daemon
+    python monthly_automation.py --now
 """
 
 import os
@@ -58,7 +58,7 @@ class MonthlyAutomation:
                 cwd=self.script_dir,
                 capture_output=True,
                 text=True,
-                timeout=1800  # 30 minute timeout
+                timeout=1800
             )
             
             if result.returncode == 0:

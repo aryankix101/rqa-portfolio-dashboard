@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 GAM Integrated Monthly Updater
 Combines GAMMorningstar extraction and Excel update in one workflow
@@ -26,7 +25,6 @@ class GAMMonthlyUpdater:
             "SCHE": "VWO",   # Schwab Emerging Markets -> Vanguard Emerging Markets
             "SPLG": "SPY",   # SPDR Portfolio S&P 500 -> SPDR S&P 500
             "TLT": "SPTL",   # iShares 20+ Year Treasury -> SPDR Portfolio Long Term Treasury
-            # Direct matches
             "IAU": "IAU",    # iShares Gold Trust
             "VEA": "VEA",    # Vanguard FTSE Developed Markets
             "VNQ": "VNQ",    # Vanguard Real Estate ETF
@@ -56,7 +54,6 @@ class GAMMonthlyUpdater:
         headers = {"User-Agent": "GAM-FlexPipeline/1.0"}
         
         try:
-            # Step 1: Send request to get reference code
             print("Step 1: Sending flex query request...")
             params = {"t": self.flex_token, "q": self.query_id, "v": "3"}
             response = session.get(self.send_url, params=params, timeout=30, headers=headers)
@@ -64,7 +61,6 @@ class GAMMonthlyUpdater:
             if response.status_code != 200:
                 raise Exception(f"SendRequest failed with HTTP {response.status_code}: {response.text[:500]}")
             
-            # Parse XML response to get reference code
             root = ET.fromstring(response.text)
             status = root.findtext(".//Status") or root.findtext(".//status") or ""
             
@@ -79,12 +75,11 @@ class GAMMonthlyUpdater:
             
             print(f"✅ Got reference code: {ref_code}")
             
-            # Step 2: Poll for results
             print("Step 2: Polling for results...")
             max_attempts = 10
             
             for attempt in range(1, max_attempts + 1):
-                time.sleep(3 if attempt > 1 else 2)  # Wait before polling
+                time.sleep(3 if attempt > 1 else 2)
                 
                 params = {"t": self.flex_token, "q": ref_code, "v": "3"}
                 response = session.get(self.get_url, params=params, timeout=60, headers=headers)
@@ -93,7 +88,6 @@ class GAMMonthlyUpdater:
                     print(f"Attempt {attempt}: HTTP {response.status_code}")
                     continue
                 
-                # Check if it's XML (status) or data
                 if response.text.lstrip().startswith("<"):
                     try:
                         root = ET.fromstring(response.text)
@@ -106,18 +100,15 @@ class GAMMonthlyUpdater:
                             print(f"Attempt {attempt}: Status = {status}")
                             continue
                     except ET.ParseError:
-                        # Not XML, treat as data
                         content = response.content
                 else:
-                    # Plain text/CSV data
                     content = response.content
                 
-                # Handle gzip compression
                 if response.headers.get("Content-Encoding", "").lower() == "gzip" or content[:2] == b"\x1f\x8b":
                     try:
                         content = gzip.decompress(content)
                     except Exception:
-                        pass  # Use original content
+                        pass
                 
                 print(f"✅ Retrieved data ({len(content)} bytes)")
                 return content.decode("utf-8", errors="replace")
@@ -138,7 +129,6 @@ class GAMMonthlyUpdater:
         # Fetch data directly from API (no file intermediate)
         content = self.fetch_flex_data_direct()
         
-        # Find all GAMMorningstar lines
         gam_lines = []
         for line in content.split('\n'):
             if 'GAMMorningstar' in line:
@@ -146,10 +136,9 @@ class GAMMonthlyUpdater:
         
         print(f"Found {len(gam_lines)} GAMMorningstar lines")
         
-        # Collect data from all accounts
         all_accounts_cnav = {}
         all_accounts_positions = {}
-        all_accounts_cash = {}  # Track cash positions separately
+        all_accounts_cash = {}
         
         for line in gam_lines:
             parts = [p.strip('"') for p in line.split('","')]
@@ -168,12 +157,11 @@ class GAMMonthlyUpdater:
             
             if section_type == 'DATA':
                 if section_name == 'CNAV':
-                    # CNAV data for returns
                     if len(parts) >= 58:
                         try:
-                            start_value = float(parts[8] or 0)  # StartingValue
-                            end_value = float(parts[56] or 0)   # EndingValue (position 56)
-                            twr = float(parts[57] or 0) / 100.0 if parts[57] else 0  # TWR as decimal
+                            start_value = float(parts[8] or 0)
+                            end_value = float(parts[56] or 0)
+                            twr = float(parts[57] or 0) / 100.0 if parts[57] else 0
                             
                             all_accounts_cnav[current_account] = {
                                 'start_value': start_value,
@@ -183,7 +171,6 @@ class GAMMonthlyUpdater:
                                 'account_alias': account_alias
                             }
                             
-                            # Mark primary account for reference
                             primary_marker = " ⭐ PRIMARY" if current_account == self.primary_account else ""
                             print(f"CNAV: {current_account} ({account_alias}) - TWR: {twr:.4f} ({twr*100:.2f}%){primary_marker}")
                             
@@ -191,13 +178,12 @@ class GAMMonthlyUpdater:
                             print(f"  Error parsing CNAV for {current_account}: {e}")
                             
                 elif section_name == 'MTMP':
-                    # MTMP data for positions
                     if len(parts) >= 32:
                         try:
-                            symbol = parts[7]  # Symbol
+                            symbol = parts[7]
                             if symbol and 'Total P/L' not in symbol:
-                                close_quantity = float(parts[30] or 0)  # CloseQuantity
-                                close_price = float(parts[31] or 0)     # ClosePrice
+                                close_quantity = float(parts[30] or 0)
+                                close_price = float(parts[31] or 0)
                                 position_value = close_quantity * close_price
                                 
                                 if position_value > 0:
@@ -206,18 +192,15 @@ class GAMMonthlyUpdater:
                                         all_accounts_cash[current_account] = 0.0
                                     
                                     if symbol in ['USD', '']:
-                                        # Track cash separately
                                         all_accounts_cash[current_account] += position_value
                                         print(f"  Cash: ${position_value:,.2f}")
                                     else:
-                                        # Regular ETF positions
                                         all_accounts_positions[current_account][symbol] = position_value
                                     
                         except (ValueError, IndexError) as e:
-                            continue  # Skip problematic position entries
+                            continue
                             
                 elif section_name in ['CRTT', 'POST']:
-                    # Additional cash position sources
                     if len(parts) >= 10:
                         try:
                             currency = parts[6] if len(parts) > 6 else ''
@@ -237,7 +220,6 @@ class GAMMonthlyUpdater:
         
         print(f"\nProcessing GAMMorningstar accounts (focusing on primary: {self.primary_account})...")
         
-        # Try to use primary account data first
         if self.primary_account in all_accounts_cnav:
             print(f"✅ Using primary account: {self.primary_account}")
             primary_cnav = all_accounts_cnav[self.primary_account]
@@ -247,14 +229,12 @@ class GAMMonthlyUpdater:
             print(f"Primary Account Portfolio: ${primary_cnav['start_value']:,.2f} -> ${primary_cnav['end_value']:,.2f}")
             print(f"Primary Account TWR: {primary_cnav['twr']:.4f} ({primary_cnav['twr']*100:.2f}%)")
             
-            # Add cash to positions for USFR mapping
             if primary_cash > 0:
                 primary_positions['USD_CASH'] = primary_cash
                 total_value = sum(primary_positions.values())
                 cash_allocation = primary_cash / total_value if total_value > 0 else 0
                 print(f"Primary Account Cash: ${primary_cash:,.2f} ({cash_allocation:.1%})")
             
-            # Display position breakdown
             if primary_positions:
                 total_value = sum(primary_positions.values())
                 print(f"\nPrimary Account Positions (Total: ${total_value:,.2f}):")
@@ -267,7 +247,6 @@ class GAMMonthlyUpdater:
         else:
             print(f"⚠️  Primary account {self.primary_account} not found, falling back to aggregation...")
             
-            # Fallback: Aggregate all accounts
             total_start_value = 0
             total_end_value = 0
             
@@ -275,7 +254,6 @@ class GAMMonthlyUpdater:
                 total_start_value += cnav_data['start_value']
                 total_end_value += cnav_data['end_value']
                 
-            # Calculate aggregated TWR
             if total_start_value > 0:
                 aggregated_twr = (total_end_value / total_start_value) - 1
             else:
@@ -284,7 +262,6 @@ class GAMMonthlyUpdater:
             print(f"Aggregated Portfolio: ${total_start_value:,.2f} -> ${total_end_value:,.2f}")
             print(f"Aggregated TWR: {aggregated_twr:.4f} ({aggregated_twr*100:.2f}%)")
             
-            # Aggregate positions across all accounts
             aggregated_positions = {}
             total_cash = 0
             
@@ -295,7 +272,6 @@ class GAMMonthlyUpdater:
                     else:
                         aggregated_positions[symbol] = value
             
-            # Aggregate cash positions
             for account_id, cash_value in all_accounts_cash.items():
                 total_cash += cash_value
         
@@ -310,7 +286,6 @@ class GAMMonthlyUpdater:
             if total_cash > 0:
                 cash_allocation = total_cash / total_position_value if total_position_value > 0 else 0
                 print(f"  USD Cash: ${total_cash:,.2f} ({cash_allocation:.1%})")
-                # Add cash to positions for USFR mapping
                 aggregated_positions['USD_CASH'] = total_cash
             
             aggregated_cnav = {
@@ -357,10 +332,9 @@ class GAMMonthlyUpdater:
     def calculate_attribution_and_returns(self, cnav_data, canonical_allocations):
         """Calculate attribution and net returns with fees"""
         
-        # Calculate returns
         gross_return = cnav_data.get('twr', 0.0)
-        fee_rate = 0.0075  # 0.75% annual fee
-        monthly_fee_rate = fee_rate / 12  # Monthly fee rate
+        fee_rate = 0.0075
+        monthly_fee_rate = fee_rate / 12
         net_return = gross_return - monthly_fee_rate
         
         print(f"\nReturn Calculations:")
@@ -368,7 +342,6 @@ class GAMMonthlyUpdater:
         print(f"Monthly Fee: {monthly_fee_rate:.4f} ({monthly_fee_rate*100:.2f}%)")
         print(f"Net Return: {net_return:.4f} ({net_return*100:.2f}%)")
         
-        # Calculate attribution for each canonical ETF
         attributions = {}
         for etf in self.canonical_etfs:
             allocation_pct = canonical_allocations.get(etf, 0.0)
@@ -377,7 +350,6 @@ class GAMMonthlyUpdater:
             if attribution != 0:
                 print(f"Attribution {etf}: {allocation_pct:.1%} × {gross_return:.2%} = {attribution:.4f}")
         
-        # Validate attribution calculations
         total_attribution = sum(attributions.values())
         print(f"\nAttribution Validation:")
         print(f"Sum of attributions: {total_attribution:.4f}")
@@ -394,7 +366,6 @@ class GAMMonthlyUpdater:
     def create_gam_dataframe(self, cnav_data, canonical_allocations, gross_return, net_return, attributions):
         """Create the GAM DataFrame for Excel update"""
         
-        # Dynamically calculate last month's end date
         today = date.today()
         if today.month == 1:
             last_month = 12
@@ -406,7 +377,6 @@ class GAMMonthlyUpdater:
         last_day_of_last_month = calendar.monthrange(last_year, last_month)[1]
         last_month_date_obj = date(last_year, last_month, last_day_of_last_month)
         
-        # Build the row data
         row_data = {
             "Date": last_month_date_obj.strftime('%-m/%-d/%Y'),
             "GAM Returns (Gross)": gross_return,
@@ -429,7 +399,6 @@ class GAMMonthlyUpdater:
         
         print(f"\nUpdating Excel file: {excel_file}")
         
-        # Create backup
         backup_name = f"GAM_integrated_backup_{date.today().strftime('%Y%m%d')}.xlsx"
         try:
             import shutil
@@ -439,11 +408,9 @@ class GAMMonthlyUpdater:
             print(f"⚠️  Backup failed: {e}")
         
         try:
-            # Load workbook to preserve formatting
             wb = openpyxl.load_workbook(excel_file, data_only=False)
             ws = wb.active
             
-            # Find the last data row
             last_data_row = 0
             for row in range(1, ws.max_row + 1):
                 if ws.cell(row=row, column=1).value:
@@ -455,10 +422,8 @@ class GAMMonthlyUpdater:
             print(f"Adding data to row {new_row}")
             print(f"Date: {row_data['Date']}")
             
-            # Add data with proper formatting
             ws.cell(row=new_row, column=1).value = row_data['Date']
             
-            # Returns with percentage formatting
             ws.cell(row=new_row, column=2).value = row_data['GAM Returns (Gross)']
             ws.cell(row=new_row, column=3).value = row_data['GAM Returns (Net)']
             ws.cell(row=new_row, column=2).number_format = '0.00%'
@@ -480,7 +445,6 @@ class GAMMonthlyUpdater:
                 ws.cell(row=new_row, column=col).value = row_data[key]
                 ws.cell(row=new_row, column=col).number_format = '0.00%'
             
-            # Save workbook
             wb.save(excel_file)
             wb.close()
             
@@ -510,19 +474,14 @@ class GAMMonthlyUpdater:
             # Step 2: Aggregate data across all accounts (including cash)
             aggregated_cnav, aggregated_positions = self.aggregate_accounts_data(all_accounts_cnav, all_accounts_positions, all_accounts_cash)
             
-            # Step 3: Calculate allocations
             allocations = self.calculate_allocations(aggregated_positions)
             
-            # Step 4: Map to canonical ETFs
             canonical_allocations, mapping_used = self.map_to_canonical_etfs(allocations)
             
-            # Step 5: Calculate attribution and returns
             gross_return, net_return, attributions = self.calculate_attribution_and_returns(aggregated_cnav, canonical_allocations)
             
-            # Step 6: Create DataFrame (no intermediate CSV)
             gam_df = self.create_gam_dataframe(aggregated_cnav, canonical_allocations, gross_return, net_return, attributions)
             
-            # Step 7: Update Excel surgically
             success = self.update_excel_surgical(gam_df)
             
             if success:
