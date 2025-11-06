@@ -1,6 +1,5 @@
 """
 Migration script to transfer data from SQLite to PostgreSQL (Supabase)
-This script will migrate all tables from your local portfolio_data.db to Supabase
 """
 
 import sqlite3

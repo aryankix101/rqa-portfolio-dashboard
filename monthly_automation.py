@@ -2,15 +2,10 @@
 Monthly Portfolio Data Automation
 
 Runs monthly data pipeline:
-1. GAM data via IBKR API  
+1. GA data via IBKR API  
 2. Market data imputation
 3. Database update
 4. PostgreSQL migration
-
-Usage:
-    python monthly_automation.py
-    python monthly_automation.py --daemon
-    python monthly_automation.py --now
 """
 
 import os
@@ -29,7 +24,7 @@ class MonthlyAutomation:
         self.running = True
         
         self.scripts = [
-            "gam_integrated_updater.py",
+            "ga_integrated_updater.py",
             "impute_data.py", 
             "excel_to_database.py",
             "migrate_to_postgres.py"

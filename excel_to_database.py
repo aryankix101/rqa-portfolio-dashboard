@@ -60,6 +60,47 @@ def create_database():
     )
     ''')
     
+    # ============================================
+    # GBE Strategy Tables (mirrors GA structure)
+    # ============================================
+    
+    # Create gbe_monthly_returns table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS gbe_monthly_returns (
+        date TEXT PRIMARY KEY,
+        gbe_returns_gross REAL,
+        gbe_returns_net REAL,
+        acwi REAL,
+        agg REAL,
+        spy REAL,
+        portfolio_50_50 REAL,
+        portfolio_60_40 REAL,
+        portfolio_70_30 REAL
+    )
+    ''')
+    
+    # Create gbe_allocations table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS gbe_allocations (
+        date TEXT,
+        asset_symbol TEXT,
+        asset_name TEXT,
+        allocation_percentage REAL,
+        PRIMARY KEY (date, asset_symbol)
+    )
+    ''')
+    
+    # Create gbe_attribution table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS gbe_attribution (
+        date TEXT,
+        asset_symbol TEXT,
+        asset_name TEXT,
+        attribution_value REAL,
+        PRIMARY KEY (date, asset_symbol)
+    )
+    ''')
+    
     conn.commit()
     return conn
 
@@ -81,13 +122,11 @@ def read_excel_data():
     monthly_returns_data = []
     ga_allocations_data = []
     ga_attribution_data = []
-    
     # Start from row 3 (row 2 has headers, row 1 has section labels)
     for row in range(3, ws.max_row + 1):
         date_val = ws.cell(row=row, column=1).value
         if date_val is None:
             continue
-            
         if isinstance(date_val, datetime):
             date_str = date_val.strftime('%Y-%m-%d')
         elif isinstance(date_val, str):

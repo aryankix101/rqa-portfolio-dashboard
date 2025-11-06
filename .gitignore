@@ -22,9 +22,6 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Secrets
-secrets.toml
-
 # Virtual Environment
 .venv/
 venv/
@@ -35,28 +32,11 @@ env/
 # Streamlit
 .streamlit/
 
-# Database files
-*.db
-*.sqlite
-*.sqlite3
-
-# Data files and exports
-*.xlsx
-*.xls
-*.csv
-database_exports/
-gam_monthly_report_*.txt
 
 # PDF files (fact sheets, reports)
 *.pdf
 *.pptx
 
-# Backup files - prevent clutter
-*_backup_*.xlsx
-*_backup_*.db
-*_integrated_backup_*.xlsx
-portfolio_data_backup_*.db
-GAM_integrated_backup_*.xlsx
 
 # macOS
 .DS_Store
@@ -112,13 +92,6 @@ tmp/
 *.backup
 *~
 
-# Other data formats
-*.xml
-*.yaml
-*.toml
-*.ini
-*.cfg
-*.conf
 
 # Archives
 *.zip

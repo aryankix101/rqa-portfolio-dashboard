@@ -25,7 +25,7 @@ portfolios = {
     '70/30': {'ACWI': 0.7, 'AGG': 0.3},
 }
 
-start = datetime(2019, 7, 1)
+start = datetime(2021, 1, 31)
 today = datetime.today()
 dates = pd.date_range(start, today, freq='ME')
 
@@ -42,7 +42,7 @@ def get_monthly_adj_returns(ticker):
     df = pd.DataFrame(data)
     df['date'] = pd.to_datetime(df['date']).dt.tz_localize(None)
     df = df.set_index('date').sort_index()
-    monthly = df['adjClose'].resample('ME').last()
+    monthly = df['adjClose'].resample('M').last()
     returns = monthly.pct_change()
     if not returns.empty:
         returns.iloc[0] = 0.0
@@ -57,7 +57,7 @@ def get_portfolio_return(weights, returns_dict):
 
 portfolio_returns = {name: get_portfolio_return(w, returns_dict) for name, w in portfolios.items()}
 
-wb = openpyxl.load_workbook('GA_new copy.xlsx')
+wb = openpyxl.load_workbook('GBE.xlsx')
 ws = wb.active
 
 col_map = {
@@ -73,50 +73,37 @@ import numpy as np
 row_map = {}
 for row in range(2, ws.max_row+1):
     date_val = ws.cell(row=row, column=1).value
-    
-    # Handle datetime objects directly (most common case after ga_integrated_updater runs)
     if isinstance(date_val, datetime):
-        date_str = date_val.strftime('%m/%d/%y')
-        row_map[date_str] = row
-    # Handle string dates
+        date_str = date_val.strftime('%-m/%-d/%y')
     elif isinstance(date_val, str):
-        # Parse various string formats and normalize to %m/%d/%y
-        for fmt in ['%m/%d/%y', '%m/%d/%Y', '%-m/%-d/%y', '%-m/%-d/%Y']:
+        try:
+            dt = datetime.strptime(date_val, '%m/%d/%y')
+            date_str = dt.strftime('%-m/%-d/%y')
+        except Exception:
             try:
-                dt = datetime.strptime(date_val, fmt)
-                date_str = dt.strftime('%m/%d/%y')
-                row_map[date_str] = row
-                break
+                dt = datetime.strptime(date_val, '%-m/%-d/%y')
+                date_str = dt.strftime('%-m/%-d/%y')
             except Exception:
                 continue
+    else:
+        continue
+    row_map[date_str] = row
 
-print(f"Found {len(row_map)} rows with dates")
-if row_map:
-    print(f"Date range: {min(row_map.keys())} to {max(row_map.keys())}")
-
-# Only update the most recent row
-if row_map:
-    # Find the most recent date in the Excel file
-    most_recent_date_str = max(row_map.keys(), key=lambda d: datetime.strptime(d, '%m/%d/%y'))
-    most_recent_row = row_map[most_recent_date_str]
-    print(f"\nUpdating only the most recent row: {most_recent_date_str} (row {most_recent_row})")
+for date in returns_dict['ACWI'].index:
+    date_str = date.strftime('%-m/%-d/%y')
+    row = row_map.get(date_str)
+    if not row:
+        continue
     
-    # Find the corresponding date in the returns data
-    most_recent_dt = datetime.strptime(most_recent_date_str, '%m/%d/%y')
-    
-    # Update tickers
     for t in tickers:
-        val = returns_dict[t].get(most_recent_dt, None)
+        val = returns_dict[t].get(date, None)
         if val is not None and not (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
-            ws.cell(row=most_recent_row, column=col_map[t]).value = round(val, 4)
-            print(f"  {t}: {val:.4f}")
+            ws.cell(row=row, column=col_map[t]).value = round(val, 4)
     
-    # Update portfolios
     for p in portfolios:
-        val = portfolio_returns[p].get(most_recent_dt, None)
+        val = portfolio_returns[p].get(date, None)
         if val is not None and not (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
-            ws.cell(row=most_recent_row, column=col_map[p]).value = round(val, 4)
-            print(f"  {p}: {val:.4f}")
+            ws.cell(row=row, column=col_map[p]).value = round(val, 4)
 
-wb.save('GA_new copy.xlsx')
-print(f"\n✅ Excel file updated successfully! Updated row {most_recent_row} for {most_recent_date_str}")
+wb.save('GBE.xlsx')
+print("Excel file updated successfully!")
