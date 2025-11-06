@@ -1,0 +1,1 @@
+web: streamlit run portfolio_dashboard.py
