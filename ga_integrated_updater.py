@@ -39,7 +39,7 @@ class GAMonthlyUpdater:
         self.send_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
         self.get_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
         
-        self.primary_account = "U4686363"
+        self.primary_account = "U1250237"
     
     def fetch_flex_data_direct(self):
         """Fetch flex data directly from IBKR API without file intermediates"""

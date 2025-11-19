@@ -29,15 +29,19 @@ pio.templates.default = "plotly_white"
 pio.templates["plotly_white"].layout.font.family = "Merriweather, serif"
 
 @st.cache_data(ttl=3600)
-def load_data():
-    """Load all data from the database (PostgreSQL primary, SQLite local fallback)"""
+def load_data(strategy='GA'):
+    """Load all data from the database (PostgreSQL primary, SQLite local fallback)
+    
+    Args:
+        strategy: 'GA' or 'GBE' to load specific strategy data
+    """
     
     db_url = get_db_connection()
     
     if db_url and POSTGRES_AVAILABLE:
-        cache_key = f"postgres_{hash(db_url) % 10000}"
+        cache_key = f"postgres_{hash(db_url) % 10000}_{strategy}"
     else:
-        cache_key = "sqlite_local"
+        cache_key = f"sqlite_local_{strategy}"
     
     if 'last_db_type' not in st.session_state:
         st.session_state.last_db_type = cache_key
@@ -47,19 +51,19 @@ def load_data():
     
     if db_url and POSTGRES_AVAILABLE:
         try:
-            return load_data_postgres()
+            return load_data_postgres(strategy)
         except Exception as e:
             st.error(f"❌ PostgreSQL connection failed: {str(e)}")
             st.error("Please check your database connection in Streamlit secrets.")
             raise e
     elif POSTGRES_AVAILABLE:
         try:
-            return load_data_postgres()
+            return load_data_postgres(strategy)
         except Exception as e:
             st.warning(f"PostgreSQL unavailable: {str(e)}. Using local SQLite.")
-            return load_data_sqlite()
+            return load_data_sqlite(strategy)
     else:
-        return load_data_sqlite()
+        return load_data_sqlite(strategy)
 
 def get_db_connection():
     """Get database connection string from secrets"""
@@ -82,11 +86,27 @@ def get_db_connection():
         # Suppress error display for missing secrets (expected in development)
         return None
 
-def load_data_postgres():
-    """Load data from PostgreSQL database"""
+def load_data_postgres(strategy='GA'):
+    """Load data from PostgreSQL database
+    
+    Args:
+        strategy: 'GA' or 'GBE' to load specific strategy data
+    """
     db_url = get_db_connection()
     if not db_url:
         raise Exception("No PostgreSQL connection string found in secrets")
+    
+    # Determine table names based on strategy
+    if strategy == 'GBE':
+        returns_table = 'gbe_monthly_returns'
+        allocations_table = 'gbe_allocations'
+        attribution_table = 'gbe_attribution'
+        returns_col = 'gbe_returns_net'
+    else:  # GA
+        returns_table = 'monthly_returns'
+        allocations_table = 'ga_allocations'
+        attribution_table = 'ga_attribution'
+        returns_col = 'ga_returns_net'
     
     try:
         engine = create_engine(db_url, connect_args={"sslmode": "require"})
@@ -94,32 +114,36 @@ def load_data_postgres():
         with engine.connect() as test_conn:
             test_conn.execute(text("SELECT 1"))
         
-        monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", engine)
+        monthly_returns = pd.read_sql_query(f"SELECT * FROM {returns_table} ORDER BY date", engine)
         
-        current_ga_allocations = pd.read_sql_query("""
-            SELECT * FROM ga_allocations 
-            WHERE date = (SELECT MAX(date) FROM ga_allocations)
+        current_allocations = pd.read_sql_query(f"""
+            SELECT * FROM {allocations_table} 
+            WHERE date = (SELECT MAX(date) FROM {allocations_table})
             ORDER BY asset_symbol
         """, engine)
         
-        historical_allocations = pd.read_sql_query("SELECT * FROM ga_allocations ORDER BY date, asset_symbol", engine)
-        historical_attribution = pd.read_sql_query("SELECT * FROM ga_attribution ORDER BY date, asset_symbol", engine)
+        historical_allocations = pd.read_sql_query(f"SELECT * FROM {allocations_table} ORDER BY date, asset_symbol", engine)
+        historical_attribution = pd.read_sql_query(f"SELECT * FROM {attribution_table} ORDER BY date, asset_symbol", engine)
+        
+        # For benchmark, always use GA benchmark (it's the same for both strategies)
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", engine)
         
         trailing_12m_allocations = historical_allocations.copy()
         trailing_12m_attribution = historical_attribution.copy()
         
-        for df in [monthly_returns, current_ga_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
+        for df in [monthly_returns, current_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
             if 'date' in df.columns:
                 df['date'] = pd.to_datetime(df['date'])
         
         return {
             'monthly_returns': monthly_returns,
-            'ga_allocations': current_ga_allocations,
-            'ga_attribution': historical_attribution,
+            'allocations': current_allocations,
+            'attribution': historical_attribution,
             'benchmark_performance': benchmark_performance,
             'trailing_12m_allocations': trailing_12m_allocations,
-            'trailing_12m_attribution': trailing_12m_attribution
+            'trailing_12m_attribution': trailing_12m_attribution,
+            'strategy': strategy,
+            'returns_column': returns_col
         }
         
     except Exception as e:
@@ -129,41 +153,61 @@ def load_data_postgres():
         if 'engine' in locals():
             engine.dispose()
 
-def load_data_sqlite():
-    """Load data from SQLite database (fallback)"""
+def load_data_sqlite(strategy='GA'):
+    """Load data from SQLite database (fallback)
+    
+    Args:
+        strategy: 'GA' or 'GBE' to load specific strategy data
+    """
     if not os.path.exists('portfolio_data.db'):
         st.error("Database not found! Please run the migration script or ensure your database is available.")
         return create_empty_data_structure()
     
+    # Determine table names based on strategy
+    if strategy == 'GBE':
+        returns_table = 'gbe_monthly_returns'
+        allocations_table = 'gbe_allocations'
+        attribution_table = 'gbe_attribution'
+        returns_col = 'gbe_returns_net'
+    else:  # GA
+        returns_table = 'monthly_returns'
+        allocations_table = 'ga_allocations'
+        attribution_table = 'ga_attribution'
+        returns_col = 'ga_returns_net'
+    
     conn = sqlite3.connect('portfolio_data.db')
     
     try:
-        monthly_returns = pd.read_sql_query("SELECT * FROM monthly_returns ORDER BY date", conn)
+        monthly_returns = pd.read_sql_query(f"SELECT * FROM {returns_table} ORDER BY date", conn)
         
-        current_ga_allocations = pd.read_sql_query("""
-            SELECT * FROM ga_allocations 
-            WHERE date = (SELECT MAX(date) FROM ga_allocations)
+        current_allocations = pd.read_sql_query(f"""
+            SELECT * FROM {allocations_table} 
+            WHERE date = (SELECT MAX(date) FROM {allocations_table})
             ORDER BY asset_symbol
         """, conn)
         
-        historical_allocations = pd.read_sql_query("SELECT * FROM ga_allocations ORDER BY date, asset_symbol", conn)
-        historical_attribution = pd.read_sql_query("SELECT * FROM ga_attribution ORDER BY date, asset_symbol", conn)
+        historical_allocations = pd.read_sql_query(f"SELECT * FROM {allocations_table} ORDER BY date, asset_symbol", conn)
+        historical_attribution = pd.read_sql_query(f"SELECT * FROM {attribution_table} ORDER BY date, asset_symbol", conn)
+        
+        # For benchmark, always use GA benchmark (it's the same for both strategies)
         benchmark_performance = pd.read_sql_query("SELECT * FROM benchmark_performance", conn)
         
         trailing_12m_allocations = historical_allocations.copy()
         trailing_12m_attribution = historical_attribution.copy()
         
-        for df in [monthly_returns, current_ga_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
+        for df in [monthly_returns, current_allocations, historical_attribution, trailing_12m_allocations, trailing_12m_attribution]:
             if 'date' in df.columns:
                 df['date'] = pd.to_datetime(df['date'])
         
         return {
             'monthly_returns': monthly_returns,
-            'ga_allocations': current_ga_allocations,
-            'ga_attribution': historical_attribution,
+            'allocations': current_allocations,
+            'attribution': historical_attribution,
             'benchmark_performance': benchmark_performance,
             'trailing_12m_allocations': trailing_12m_allocations,
-            'trailing_12m_attribution': trailing_12m_attribution
+            'trailing_12m_attribution': trailing_12m_attribution,
+            'strategy': strategy,
+            'returns_column': returns_col
         }
         
     finally:
@@ -174,11 +218,13 @@ def create_empty_data_structure():
     empty_df = pd.DataFrame()
     return {
         'monthly_returns': empty_df,
-        'ga_allocations': empty_df,
-        'ga_attribution': empty_df,
+        'allocations': empty_df,
+        'attribution': empty_df,
         'benchmark_performance': empty_df,
         'trailing_12m_allocations': empty_df,
-        'trailing_12m_attribution': empty_df
+        'trailing_12m_attribution': empty_df,
+        'strategy': 'GA',
+        'returns_column': 'ga_returns_net'
     }
 
 def create_growth_chart(data):
@@ -186,9 +232,26 @@ def create_growth_chart(data):
     df = data['monthly_returns'].copy()
     df['date'] = pd.to_datetime(df['date'])
     
+    strategy = data.get('strategy', 'GA')
+    returns_col = data.get('returns_column', 'ga_returns_net')
+    strategy_name = 'RQA Global Adaptive' if strategy == 'GA' else 'RQA Global Balance & Equity'
+    
+    # Filter start date for GBE only
+    # GA: starts from inception (2019) - no filtering
+    # GBE: starts from 2021-01-31 for consistent comparison
+    if strategy == 'GBE':
+        start_date = pd.to_datetime('2021-01-31')
+        df = df[df['date'] >= start_date].copy()
+    
     initial_investment = 100000
     
-    df['ga_cumulative'] = initial_investment * (1 + df['ga_returns_net']).cumprod()
+    # Use hardcoded column names to match original GA implementation
+    if strategy == 'GA':
+        df['ga_cumulative'] = initial_investment * (1 + df['ga_returns_net']).cumprod()
+        strategy_col = 'ga_cumulative'
+    else:
+        df['strategy_cumulative'] = initial_investment * (1 + df[returns_col]).cumprod()
+        strategy_col = 'strategy_cumulative'
     
     df['benchmark_60_40'] = initial_investment * (1 + df['portfolio_60_40']).cumprod()
     
@@ -196,9 +259,9 @@ def create_growth_chart(data):
     
     fig.add_trace(go.Scatter(
         x=df['date'],
-        y=df['ga_cumulative'],
+        y=df[strategy_col],
         mode='lines',
-        name='RQA Global Adaptive',
+        name=strategy_name,
         line=dict(color='#1e3a8a', width=3),  # Dark blue
         hovertemplate='Date: %{x}<br>Value: $%{y:,.0f}<extra></extra>'
     ))
@@ -359,8 +422,10 @@ def create_trailing_12m_allocations_chart(data):
 def create_monthly_returns_chart(data):
     """Create Monthly Returns chart with rolling volatility"""
     df = data['monthly_returns'].copy()
+    returns_col = data.get('returns_column', 'ga_returns_net')
+    strategy = data.get('strategy', 'GA')
     
-    df['rolling_volatility'] = df['ga_returns_net'].rolling(window=12).std() * np.sqrt(12)
+    df['rolling_volatility'] = df[returns_col].rolling(window=12).std() * np.sqrt(12)
     
     fig = make_subplots(
         rows=2, cols=1,
@@ -369,11 +434,11 @@ def create_monthly_returns_chart(data):
         row_heights=[0.7, 0.3]
     )
     
-    colors = ['green' if x >= 0 else 'red' for x in df['ga_returns_net']]
+    colors = ['green' if x >= 0 else 'red' for x in df[returns_col]]
     fig.add_trace(
         go.Bar(
             x=df['date'],
-            y=df['ga_returns_net'] * 100,
+            y=df[returns_col] * 100,
             name='Monthly Returns',
             marker_color=colors,
             hovertemplate='Date: %{x}<br>Return: %{y:.2f}%<extra></extra>'
@@ -393,10 +458,11 @@ def create_monthly_returns_chart(data):
         row=2, col=1
     )
     
+    strategy_name = strategy if strategy == 'GA' else 'GBE'
     fig.update_layout(
         height=700,
         showlegend=False,
-        title_text="GA Portfolio Performance Analysis"
+        title_text=f"{strategy_name} Portfolio Performance Analysis"
     )
     
     return fig
@@ -695,58 +761,170 @@ def create_attribution_chart(data):
     return fig
 
 def calculate_ga_performance_metrics(data_dict):
-    """Get GA performance metrics from database and calculate 3-year return"""
+    """Get performance metrics from database and calculate 3-year return"""
     benchmark_data = data_dict['benchmark_performance']
     monthly_returns_df = data_dict['monthly_returns']
+    strategy = data_dict.get('strategy', 'GA')
+    returns_col = data_dict.get('returns_column', 'ga_returns_net')
 
-    ga_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GA']
+    # For GA, use GA benchmark. For GBE, calculate metrics from monthly returns
+    if strategy == 'GA':
+        ga_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GA']
+        
+        if not ga_benchmark.empty:
+            ga_data = ga_benchmark.iloc[0]
+            
+            # Calculate 3-year return from monthly returns data
+            df = monthly_returns_df.copy()
+            df['date'] = pd.to_datetime(df['date'])
+            current_date = df['date'].max()
+            three_years_ago = current_date - timedelta(days=3*365.25)
+            three_year_data = df[df['date'] >= three_years_ago]
+            
+            if len(three_year_data) >= 24:
+                three_year_total_return = (1 + three_year_data[returns_col]).prod() - 1
+                years = len(three_year_data) / 12
+                three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
+            else:
+                three_year_annualized = 0.0
+            
+            return {
+                'ytd': ga_data['ytd'],
+                'one_year': ga_data['one_year'],
+                'three_year': three_year_annualized,
+                'five_year': ga_data['five_year'],
+                'since_inception': ga_data['since_inception'],
+                'standard_deviation': ga_data['standard_deviation'],
+                'sharpe_ratio': ga_data['sharpe_ratio'],
+                'beta_to_sp500': ga_data['beta_to_sp500'],
+                'max_drawdown': 0.0,
+                'downside_deviation': 0.0
+            }
     
-    if not ga_benchmark.empty:
-        ga_data = ga_benchmark.iloc[0]
-        
-        # Calculate 3-year return from monthly returns data
-        df = monthly_returns_df.copy()
-        df['date'] = pd.to_datetime(df['date'])
-        current_date = df['date'].max()
-        three_years_ago = current_date - timedelta(days=3*365.25)
-        three_year_data = df[df['date'] >= three_years_ago]
-        
-        if len(three_year_data) >= 24:
-            three_year_total_return = (1 + three_year_data['ga_returns_net']).prod() - 1
-            years = len(three_year_data) / 12
-            three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
+    # For GBE, calculate all metrics from monthly returns
+    df = monthly_returns_df.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    
+    if returns_col not in df.columns:
+        return {
+            'ytd': 0.0, 'one_year': 0.0, 'three_year': 0.0, 'five_year': 0.0,
+            'since_inception': 0.0, 'standard_deviation': 0.0, 'sharpe_ratio': 0.0,
+            'beta_to_sp500': 0.0, 'max_drawdown': 0.0, 'downside_deviation': 0.0
+        }
+    
+    returns = df[returns_col].dropna()
+    
+    if len(returns) < 2:
+        # Return what we can calculate with limited data
+        if len(returns) == 1:
+            return {
+                'ytd': returns.iloc[0],
+                'one_year': 0.0,
+                'three_year': 0.0,
+                'five_year': 0.0,
+                'since_inception': returns.iloc[0],
+                'standard_deviation': 0.0,
+                'sharpe_ratio': 0.0,
+                'beta_to_sp500': 0.0,
+                'max_drawdown': 0.0,
+                'downside_deviation': 0.0
+            }
         else:
-            three_year_annualized = 0.0
-        
-        return {
-            'ytd': ga_data['ytd'],
-            'one_year': ga_data['one_year'],
-            'three_year': three_year_annualized,  # Calculated from monthly returns
-            'five_year': ga_data['five_year'],
-            'since_inception': ga_data['since_inception'],
-            'standard_deviation': ga_data['standard_deviation'],
-            'sharpe_ratio': ga_data['sharpe_ratio'],
-            'beta_to_sp500': ga_data['beta_to_sp500'],
-            'max_drawdown': 0.0,  # Not stored in database yet, could be added later
-            'downside_deviation': 0.0  # Not stored in database yet, could be added later
-        }
+            return {
+                'ytd': 0.0, 'one_year': 0.0, 'three_year': 0.0, 'five_year': 0.0,
+                'since_inception': 0.0, 'standard_deviation': 0.0, 'sharpe_ratio': 0.0,
+                'beta_to_sp500': 0.0, 'max_drawdown': 0.0, 'downside_deviation': 0.0
+            }
+    
+    current_date = df['date'].max()
+    
+    # YTD
+    current_year = current_date.year
+    ytd_data = returns[df['date'].dt.year == current_year]
+    ytd_return = (1 + ytd_data).prod() - 1 if len(ytd_data) > 0 else 0.0
+    
+    # 1-Year - need at least 11 months
+    one_year_ago = current_date - timedelta(days=365.25)
+    one_year_data = returns[df['date'] >= one_year_ago]
+    if len(one_year_data) >= 11:
+        one_year_total = (1 + one_year_data).prod() - 1
+        years = len(one_year_data) / 12
+        one_year_return = (1 + one_year_total) ** (1/years) - 1 if years > 0 else 0
     else:
-        return {
-            'ytd': 0.0,
-            'one_year': 0.0,
-            'three_year': 0.0,
-            'five_year': 0.0,
-            'since_inception': 0.0,
-            'standard_deviation': 0.0,
-            'sharpe_ratio': 0.0,
-            'beta_to_sp500': 0.0,
-            'max_drawdown': 0.0,
-            'downside_deviation': 0.0
-        }
+        one_year_return = None  # Not enough data
+    
+    # 3-Year - need at least 30 months
+    three_years_ago = current_date - timedelta(days=3*365.25)
+    three_year_data = returns[df['date'] >= three_years_ago]
+    if len(three_year_data) >= 30:
+        three_year_total = (1 + three_year_data).prod() - 1
+        years = len(three_year_data) / 12
+        three_year_return = (1 + three_year_total) ** (1/years) - 1 if years > 0 else 0
+    else:
+        three_year_return = None  # Not enough data
+    
+    # 5-Year - need at least 54 months
+    five_years_ago = current_date - timedelta(days=5*365.25)
+    five_year_data = returns[df['date'] >= five_years_ago]
+    if len(five_year_data) >= 54:
+        five_year_total = (1 + five_year_data).prod() - 1
+        years = len(five_year_data) / 12
+        five_year_return = (1 + five_year_total) ** (1/years) - 1 if years > 0 else 0
+    else:
+        five_year_return = None  # Not enough data
+    
+    # Since Inception - need at least 2 months
+    if len(returns) >= 2:
+        cumulative_return = (1 + returns).prod() - 1
+        years = len(returns) / 12
+        since_inception = (1 + cumulative_return) ** (1/years) - 1 if years > 0 else 0
+    else:
+        since_inception = returns.iloc[0] if len(returns) == 1 else 0.0
+    
+    # Risk metrics - need at least 12 months for meaningful volatility
+    if len(returns) >= 12:
+        std_dev = returns.std() * np.sqrt(12)
+    else:
+        std_dev = None  # Not enough data for annualized volatility
+    
+    # Sharpe ratio - need both return and volatility
+    if std_dev is not None and std_dev > 0:
+        annualized_return = since_inception
+        sharpe = annualized_return / std_dev
+    else:
+        sharpe = None
+    
+    # Beta to S&P 500 - need at least 12 months
+    if len(returns) >= 12:
+        spy_returns = df['spy'].dropna()
+        aligned_returns = returns[returns.index.isin(spy_returns.index)]
+        aligned_spy = spy_returns[spy_returns.index.isin(returns.index)]
+        
+        if len(aligned_returns) >= 12 and len(aligned_spy) >= 12:
+            covariance = np.cov(aligned_returns, aligned_spy)[0][1]
+            spy_variance = np.var(aligned_spy)
+            beta = covariance / spy_variance if spy_variance > 0 else None
+        else:
+            beta = None
+    else:
+        beta = None
+    
+    return {
+        'ytd': ytd_return,
+        'one_year': one_year_return,
+        'three_year': three_year_return,
+        'five_year': five_year_return,
+        'since_inception': since_inception,
+        'standard_deviation': std_dev,
+        'sharpe_ratio': sharpe,
+        'beta_to_sp500': beta,
+        'max_drawdown': 0.0,
+        'downside_deviation': 0.0
+    }
 
 def create_allocation_pie_chart(data):
     """Create current allocation pie chart"""
-    df = data['ga_allocations'].copy()  # Use current GA allocations
+    df = data['allocations'].copy()  # Use current allocations
     
     if df.empty:
         fig = go.Figure()
@@ -844,12 +1022,22 @@ def main():
         initial_sidebar_state="collapsed"
     )
     
-    data = load_data()
-    
-    ga_metrics = calculate_ga_performance_metrics(data)
-    
+    # Strategy selector in sidebar
     st.sidebar.image("logo.png", width=200)
     st.sidebar.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
+    
+    strategy = st.sidebar.selectbox(
+        "Select Strategy",
+        ["Global Adaptive (GA)", "Global Balance & Equity (GBE)"],
+        index=0
+    )
+    
+    # Parse strategy code
+    strategy_code = 'GA' if 'GA' in strategy else 'GBE'
+    
+    data = load_data(strategy_code)
+    
+    ga_metrics = calculate_ga_performance_metrics(data)
     
     # Main navigation choice
     view_option = st.sidebar.selectbox(
@@ -859,16 +1047,18 @@ def main():
     )
     
     if view_option == "Strategy Fact Sheet":
-        create_fact_sheet_landing(data, ga_metrics)
+        create_fact_sheet_landing(data, ga_metrics, strategy_code)
     else:
-        create_analytics_dashboard(data, ga_metrics)
+        create_analytics_dashboard(data, ga_metrics, strategy_code)
 
 
 
-def create_fact_sheet_landing(data, ga_metrics):
+def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
     # Clean Professional Header with Logo and Strategy Name
     import base64
     import os
+    
+    strategy_title = "GLOBAL ADAPTIVE" if strategy == 'GA' else "GLOBAL BALANCE & EQUITY"
     
     logo_html = ""
     if os.path.exists("logo.png"):
@@ -914,7 +1104,7 @@ def create_fact_sheet_landing(data, ga_metrics):
                 line-height: 1.1;
                 text-shadow: 0 3px 6px rgba(0,0,0,0.4);
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica Neue', Arial, sans-serif;
-            ">GLOBAL ADAPTIVE</h1>
+            ">{strategy_title}</h1>
             <div style="
                 width: 280px; 
                 height: 2px; 
@@ -971,6 +1161,8 @@ def create_fact_sheet_landing(data, ga_metrics):
         
         benchmark_data = data['benchmark_performance'].copy()
         
+        strategy_display_name = 'RQA Global Adaptive' if strategy == 'GA' else 'RQA Global Balance & Equity'
+        
         global_6040 = benchmark_data[benchmark_data['portfolio'] == '60/40'].iloc[0] if not benchmark_data.empty else None
         
         # Calculate 3-year return for 60/40 from monthly returns data
@@ -989,18 +1181,24 @@ def create_fact_sheet_landing(data, ga_metrics):
             three_year_annualized_6040 = 0.0
         
         performance_data = {
-            '': ['RQA Global Adaptive', 'Global 60/40'],
-            'YTD': [f"{ga_metrics['ytd']*100:.1f}%", 
+            '': [strategy_display_name, 'Global 60/40'],
+            'YTD': [f"{ga_metrics['ytd']*100:.1f}%" if ga_metrics['ytd'] is not None else "N/A", 
                    f"{global_6040['ytd']*100:.1f}%" if global_6040 is not None else "N/A"],
-            '1 Year': [f"{ga_metrics['one_year']*100:.1f}%", 
+            '1 Year': [f"{ga_metrics['one_year']*100:.1f}%" if ga_metrics['one_year'] is not None else "N/A", 
                       f"{global_6040['one_year']*100:.1f}%" if global_6040 is not None else "N/A"],
-            '3 Year': [f"{ga_metrics['three_year']*100:.1f}%", 
-                      f"{three_year_annualized_6040*100:.1f}%"],  # Now using calculated 3-year return
-            '5 Year': [f"{ga_metrics['five_year']*100:.1f}%", 
-                      f"{global_6040['five_year']*100:.1f}%" if global_6040 is not None else "N/A"],
-            'Since Inception': [f"{ga_metrics['since_inception']*100:.1f}%", 
+            '3 Year': [f"{ga_metrics['three_year']*100:.1f}%" if ga_metrics['three_year'] is not None else "N/A", 
+                      f"{three_year_annualized_6040*100:.1f}%"],
+            'Since Inception': [f"{ga_metrics['since_inception']*100:.1f}%" if ga_metrics['since_inception'] is not None else "N/A", 
                               f"{global_6040['since_inception']*100:.1f}%" if global_6040 is not None else "N/A"]
         }
+        
+        # Add 5 Year column only for GA strategy
+        if strategy == 'GA':
+            performance_data['5 Year'] = [f"{ga_metrics['five_year']*100:.1f}%" if ga_metrics['five_year'] is not None else "N/A", 
+                      f"{global_6040['five_year']*100:.1f}%" if global_6040 is not None else "N/A"]
+            # Reorder columns to put 5 Year before Since Inception
+            column_order = ['', 'YTD', '1 Year', '3 Year', '5 Year', 'Since Inception']
+            performance_data = {k: performance_data[k] for k in column_order}
         
         df_performance = pd.DataFrame(performance_data)
         st.dataframe(df_performance, hide_index=True, use_container_width=True)
@@ -1017,14 +1215,21 @@ def create_fact_sheet_landing(data, ga_metrics):
         </div>
         """, unsafe_allow_html=True)
         
+        # Format metrics safely, handling None values
+        def fmt_pct(val):
+            return f"{val*100:.1f}%" if val is not None else "N/A"
+        
+        def fmt_ratio(val):
+            return f"{val:.2f}" if val is not None else "N/A"
+        
         risk_data = {
             'Metric': ['Annualized Volatility', 'Sharpe Ratio (RF=0)', 'Beta (vs. S&P)'],
-            'GA': [f"{ga_metrics['standard_deviation']*100:.1f}%", 
-                   f"{ga_metrics['sharpe_ratio']:.2f}", 
-                   f"{ga_metrics['beta_to_sp500']:.2f}"],
-            'Global 60/40': [f"{global_6040['standard_deviation']*100:.1f}%" if global_6040 is not None else "N/A",
-                            f"{global_6040['sharpe_ratio']:.2f}" if global_6040 is not None else "N/A",
-                            f"{global_6040['beta_to_sp500']:.2f}" if global_6040 is not None else "N/A"]
+            strategy: [fmt_pct(ga_metrics.get('standard_deviation')), 
+                       fmt_ratio(ga_metrics.get('sharpe_ratio')), 
+                       fmt_ratio(ga_metrics.get('beta_to_sp500'))],
+            'Global 60/40': [fmt_pct(global_6040['standard_deviation']) if global_6040 is not None else "N/A",
+                            fmt_ratio(global_6040['sharpe_ratio']) if global_6040 is not None else "N/A",
+                            fmt_ratio(global_6040['beta_to_sp500']) if global_6040 is not None else "N/A"]
         }
         
         df_risk = pd.DataFrame(risk_data)
@@ -1108,7 +1313,7 @@ def create_fact_sheet_landing(data, ga_metrics):
         </div>
         """, unsafe_allow_html=True)
         
-        df = data['ga_allocations'].copy()
+        df = data['allocations'].copy()
         
         if df.empty:
             st.markdown("*No allocation data available*")
@@ -1222,7 +1427,7 @@ def create_fact_sheet_landing(data, ga_metrics):
     </div>
     """, unsafe_allow_html=True)
 
-def create_analytics_dashboard(data, ga_metrics):
+def create_analytics_dashboard(data, ga_metrics, strategy='GA'):
     # Clean Professional Header with Logo and Analytics Name
     import base64
     import os
@@ -1294,13 +1499,13 @@ def create_analytics_dashboard(data, ga_metrics):
     """, unsafe_allow_html=True)
     
     st.sidebar.header("Performance Metrics")
-    st.sidebar.metric("YTD Return", f"{ga_metrics['ytd']*100:.2f}%")
-    st.sidebar.metric("1-Year Return", f"{ga_metrics['one_year']*100:.2f}%")
-    st.sidebar.metric("5-Year Return", f"{ga_metrics['five_year']*100:.2f}%")
-    st.sidebar.metric("Since Inception", f"{ga_metrics['since_inception']*100:.2f}%")
-    st.sidebar.metric("Sharpe Ratio", f"{ga_metrics['sharpe_ratio']:.3f}")
-    st.sidebar.metric("Volatility", f"{ga_metrics['standard_deviation']*100:.2f}%")
-    st.sidebar.metric("Beta to S&P 500", f"{ga_metrics['beta_to_sp500']:.3f}")
+    st.sidebar.metric("YTD Return", f"{ga_metrics['ytd']*100:.2f}%" if ga_metrics['ytd'] is not None else "N/A")
+    st.sidebar.metric("1-Year Return", f"{ga_metrics['one_year']*100:.2f}%" if ga_metrics['one_year'] is not None else "N/A")
+    st.sidebar.metric("5-Year Return", f"{ga_metrics['five_year']*100:.2f}%" if ga_metrics['five_year'] is not None else "N/A")
+    st.sidebar.metric("Since Inception", f"{ga_metrics['since_inception']*100:.2f}%" if ga_metrics['since_inception'] is not None else "N/A")
+    st.sidebar.metric("Sharpe Ratio", f"{ga_metrics['sharpe_ratio']:.3f}" if ga_metrics['sharpe_ratio'] is not None else "N/A")
+    st.sidebar.metric("Volatility", f"{ga_metrics['standard_deviation']*100:.2f}%" if ga_metrics['standard_deviation'] is not None else "N/A")
+    st.sidebar.metric("Beta to S&P 500", f"{ga_metrics['beta_to_sp500']:.3f}" if ga_metrics['beta_to_sp500'] is not None else "N/A")
     
     # Main content tabs
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -1332,8 +1537,8 @@ def create_analytics_dashboard(data, ga_metrics):
         
         with col2:
             st.markdown("### Target Allocation Breakdown")
-            # Show allocation table using current GA data with abbreviated names
-            df = data['ga_allocations'].copy()
+            # Show allocation table using current data with abbreviated names
+            df = data['allocations'].copy()
             
             if df.empty:
                 st.markdown("*No allocation data available*")
@@ -1404,16 +1609,17 @@ def create_analytics_dashboard(data, ga_metrics):
         st.plotly_chart(create_monthly_returns_chart(data), use_container_width=True)
         
         returns_data = data['monthly_returns']
+        returns_col = data.get('returns_column', 'ga_returns_net')
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("Average Monthly Return", f"{returns_data['ga_returns_net'].mean()*100:.2f}%")
+            st.metric("Average Monthly Return", f"{returns_data[returns_col].mean()*100:.2f}%")
         with col2:
-            st.metric("Best Month", f"{returns_data['ga_returns_net'].max()*100:.2f}%")
+            st.metric("Best Month", f"{returns_data[returns_col].max()*100:.2f}%")
         with col3:
-            st.metric("Worst Month", f"{returns_data['ga_returns_net'].min()*100:.2f}%")
+            st.metric("Worst Month", f"{returns_data[returns_col].min()*100:.2f}%")
         with col4:
-            st.metric("Win Rate", f"{(returns_data['ga_returns_net'] > 0).mean()*100:.1f}%")
+            st.metric("Win Rate", f"{(returns_data[returns_col] > 0).mean()*100:.1f}%")
     
     with tab4:
         st.markdown("""

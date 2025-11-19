@@ -104,7 +104,7 @@ def create_database():
     conn.commit()
     return conn
 
-def read_excel_data():
+def read_ga_excel_data():
     wb = openpyxl.load_workbook('GA_new copy.xlsx')
     ws = wb.active
     
@@ -212,6 +212,121 @@ def read_excel_data():
             pd.DataFrame(ga_allocations_data), 
             pd.DataFrame(ga_attribution_data))
 
+def read_gbe_excel_data():
+    """Read GBE.xlsx and extract monthly returns, allocations, and attribution data"""
+    # Load with data_only=True to read calculated formula values instead of formulas
+    wb = openpyxl.load_workbook('GBE.xlsx', data_only=True)
+    ws = wb.active
+    
+    # GBE asset mapping - 14 ETFs
+    asset_mapping = {
+        'PDBC': 'Commodities',
+        'VWO': 'EM_Stocks',
+        'IEV': 'Europe_Stocks',
+        'BWX': 'Intl_Bonds',
+        'IAU': 'Gold',
+        'VEA': 'Intl_Dev_Stocks',
+        'RWX': 'Intl_REITs',
+        'EWJ': 'Japan_Stocks',
+        'BIV': 'Intermediate_Bonds',
+        'SPY': 'SP500',
+        'TIP': 'TIPS',
+        'BND': 'Agg_Bonds',
+        'SPTL': 'US_LT_Treas',
+        'VNQ': 'US_REITs'
+    }
+    
+    monthly_returns_data = []
+    gbe_allocations_data = []
+    gbe_attribution_data = []
+    
+    # Start from row 3 (row 2 has headers, row 1 has section labels)
+    for row in range(3, ws.max_row + 1):
+        date_val = ws.cell(row=row, column=1).value
+        if date_val is None:
+            continue
+        if isinstance(date_val, datetime):
+            date_str = date_val.strftime('%Y-%m-%d')
+        elif isinstance(date_val, str):
+            try:
+                dt = datetime.strptime(date_val, '%m/%d/%y')
+                date_str = dt.strftime('%Y-%m-%d')
+            except Exception:
+                try:
+                    dt = datetime.strptime(date_val, '%m/%d/%Y')
+                    date_str = dt.strftime('%Y-%m-%d')
+                except Exception:
+                    continue
+        else:
+            continue
+        
+        # Convert numeric strings to floats, handle None values
+        def safe_float_convert(value):
+            if value is None or value == '' or (isinstance(value, str) and value.strip() == ''):
+                return None
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+        
+        # Extract monthly returns data (columns 2-3 for GBE, then benchmark columns)
+        gbe_returns_gross = safe_float_convert(ws.cell(row=row, column=2).value)
+        gbe_returns_net = safe_float_convert(ws.cell(row=row, column=3).value)
+        
+        # Benchmarks (assuming similar structure to GA - adjust if different)
+        acwi = safe_float_convert(ws.cell(row=row, column=4).value)
+        agg = safe_float_convert(ws.cell(row=row, column=5).value)
+        spy = safe_float_convert(ws.cell(row=row, column=6).value)
+        port_50_50 = safe_float_convert(ws.cell(row=row, column=7).value)
+        port_60_40 = safe_float_convert(ws.cell(row=row, column=8).value)
+        port_70_30 = safe_float_convert(ws.cell(row=row, column=9).value)
+        
+        monthly_returns_data.append({
+            'date': date_str,
+            'gbe_returns_gross': gbe_returns_gross,
+            'gbe_returns_net': gbe_returns_net,
+            'acwi': acwi,
+            'agg': agg,
+            'spy': spy,
+            'portfolio_50_50': port_50_50,
+            'portfolio_60_40': port_60_40,
+            'portfolio_70_30': port_70_30
+        })
+        
+        # Extract GBE allocation data (columns 10-23 for 14 ETFs)
+        allocation_columns = list(range(10, 24))  # Columns J-W (10-23)
+        for col in allocation_columns:
+            asset_symbol = ws.cell(row=2, column=col).value
+            allocation_value = safe_float_convert(ws.cell(row=row, column=col).value)
+            
+            if asset_symbol and allocation_value is not None:
+                asset_name = asset_mapping.get(asset_symbol, asset_symbol)
+                gbe_allocations_data.append({
+                    'date': date_str,
+                    'asset_symbol': asset_symbol,
+                    'asset_name': asset_name,
+                    'allocation_percentage': allocation_value
+                })
+        
+        # Extract GBE attribution data (columns 24-37 for 14 ETFs)
+        attribution_columns = list(range(24, 38))  # Columns X-AK (24-37)
+        for col in attribution_columns:
+            asset_symbol = ws.cell(row=2, column=col).value
+            attribution_value = safe_float_convert(ws.cell(row=row, column=col).value)
+            
+            if asset_symbol and attribution_value is not None:
+                asset_name = asset_mapping.get(asset_symbol, asset_symbol)
+                gbe_attribution_data.append({
+                    'date': date_str,
+                    'asset_symbol': asset_symbol,
+                    'asset_name': asset_name,
+                    'attribution_value': attribution_value
+                })
+    
+    return (pd.DataFrame(monthly_returns_data), 
+            pd.DataFrame(gbe_allocations_data), 
+            pd.DataFrame(gbe_attribution_data))
+
 def annualized_return(returns, periods):
     if len(returns) < periods:
         return None
@@ -258,6 +373,13 @@ def store_all_data(conn, monthly_returns_df, ga_allocations_df, ga_attribution_d
     monthly_returns_df.to_sql('monthly_returns', conn, if_exists='replace', index=False)
     ga_allocations_df.to_sql('ga_allocations', conn, if_exists='replace', index=False)
     ga_attribution_df.to_sql('ga_attribution', conn, if_exists='replace', index=False)
+
+def store_gbe_data(conn, gbe_monthly_returns_df, gbe_allocations_df, gbe_attribution_df):
+    """Store GBE data in the database"""
+    gbe_monthly_returns_df.to_sql('gbe_monthly_returns', conn, if_exists='replace', index=False)
+    gbe_allocations_df.to_sql('gbe_allocations', conn, if_exists='replace', index=False)
+    gbe_attribution_df.to_sql('gbe_attribution', conn, if_exists='replace', index=False)
+
 
 def calculate_benchmark_performance(conn, monthly_returns_df):
     df = monthly_returns_df.copy()
@@ -346,16 +468,29 @@ def main():
     print("Creating database...")
     conn = create_database()
     
-    print("Reading Excel data...")
-    monthly_returns_df, ga_allocations_df, ga_attribution_df = read_excel_data()
+    print("Reading GA Excel data...")
+    monthly_returns_df, ga_allocations_df, ga_attribution_df = read_ga_excel_data()
     
-    print("Storing data...")
+    print("Storing GA data...")
     store_all_data(conn, monthly_returns_df, ga_allocations_df, ga_attribution_df)
     
-    print("Calculating benchmark performance...")
+    print("Calculating GA benchmark performance...")
     calculate_benchmark_performance(conn, monthly_returns_df)
     
-    print("Database creation complete!")
+    print("\nReading GBE Excel data...")
+    try:
+        gbe_monthly_returns_df, gbe_allocations_df, gbe_attribution_df = read_gbe_excel_data()
+        
+        print("Storing GBE data...")
+        store_gbe_data(conn, gbe_monthly_returns_df, gbe_allocations_df, gbe_attribution_df)
+        
+        print("GBE data migration complete!")
+    except FileNotFoundError:
+        print("⚠️  GBE.xlsx not found - skipping GBE data migration")
+    except Exception as e:
+        print(f"⚠️  Error processing GBE data: {e}")
+    
+    print("\n✅ Database creation complete!")
     
     conn.close()
 

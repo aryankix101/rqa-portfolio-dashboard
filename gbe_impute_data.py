@@ -7,7 +7,7 @@ import os
 
 def load_config():
     secrets = toml.load('secrets.toml')
-    return secrets
+    return secrets 
     
 
 config = load_config()
@@ -25,7 +25,7 @@ portfolios = {
     '70/30': {'ACWI': 0.7, 'AGG': 0.3},
 }
 
-start = datetime(2021, 1, 31)
+start = datetime(2020, 12, 31)
 today = datetime.today()
 dates = pd.date_range(start, today, freq='ME')
 
@@ -75,19 +75,20 @@ for row in range(2, ws.max_row+1):
     date_val = ws.cell(row=row, column=1).value
     if isinstance(date_val, datetime):
         date_str = date_val.strftime('%-m/%-d/%y')
+        row_map[date_str] = row
     elif isinstance(date_val, str):
         try:
             dt = datetime.strptime(date_val, '%m/%d/%y')
             date_str = dt.strftime('%-m/%-d/%y')
+            row_map[date_str] = row
         except Exception:
             try:
                 dt = datetime.strptime(date_val, '%-m/%-d/%y')
                 date_str = dt.strftime('%-m/%-d/%y')
+                row_map[date_str] = row
             except Exception:
                 continue
-    else:
-        continue
-    row_map[date_str] = row
+    
 
 for date in returns_dict['ACWI'].index:
     date_str = date.strftime('%-m/%-d/%y')
