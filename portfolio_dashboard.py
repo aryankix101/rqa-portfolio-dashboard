@@ -33,7 +33,7 @@ def load_data(strategy='GA'):
     """Load all data from the database (PostgreSQL primary, SQLite local fallback)
     
     Args:
-        strategy: 'GA' or 'GBE' to load specific strategy data
+        strategy: 'GA' or 'GB' to load specific strategy data
     """
     
     db_url = get_db_connection()
@@ -90,18 +90,18 @@ def load_data_postgres(strategy='GA'):
     """Load data from PostgreSQL database
     
     Args:
-        strategy: 'GA' or 'GBE' to load specific strategy data
+        strategy: 'GA' or 'GB' to load specific strategy data
     """
     db_url = get_db_connection()
     if not db_url:
         raise Exception("No PostgreSQL connection string found in secrets")
     
     # Determine table names based on strategy
-    if strategy == 'GBE':
-        returns_table = 'gbe_monthly_returns'
-        allocations_table = 'gbe_allocations'
-        attribution_table = 'gbe_attribution'
-        returns_col = 'gbe_returns_net'
+    if strategy == 'GB':
+        returns_table = 'GB_monthly_returns'
+        allocations_table = 'GB_allocations'
+        attribution_table = 'GB_attribution'
+        returns_col = 'GB_returns_net'
     else:  # GA
         returns_table = 'monthly_returns'
         allocations_table = 'ga_allocations'
@@ -157,18 +157,18 @@ def load_data_sqlite(strategy='GA'):
     """Load data from SQLite database (fallback)
     
     Args:
-        strategy: 'GA' or 'GBE' to load specific strategy data
+        strategy: 'GA' or 'GB' to load specific strategy data
     """
     if not os.path.exists('portfolio_data.db'):
         st.error("Database not found! Please run the migration script or ensure your database is available.")
         return create_empty_data_structure()
     
     # Determine table names based on strategy
-    if strategy == 'GBE':
-        returns_table = 'gbe_monthly_returns'
-        allocations_table = 'gbe_allocations'
-        attribution_table = 'gbe_attribution'
-        returns_col = 'gbe_returns_net'
+    if strategy == 'GB':
+        returns_table = 'GB_monthly_returns'
+        allocations_table = 'GB_allocations'
+        attribution_table = 'GB_attribution'
+        returns_col = 'GB_returns_net'
     else:  # GA
         returns_table = 'monthly_returns'
         allocations_table = 'ga_allocations'
@@ -234,12 +234,12 @@ def create_growth_chart(data):
     
     strategy = data.get('strategy', 'GA')
     returns_col = data.get('returns_column', 'ga_returns_net')
-    strategy_name = 'RQA Global Adaptive' if strategy == 'GA' else 'RQA Global Balance & Equity'
+    strategy_name = 'RQA Global Adaptive' if strategy == 'GA' else 'RQA Global Balanced'
     
-    # Filter start date for GBE only
+    # Filter start date for GB only
     # GA: starts from inception (2019) - no filtering
-    # GBE: starts from 2021-01-31 for consistent comparison
-    if strategy == 'GBE':
+    # GB: starts from 2021-01-31 for consistent comparison
+    if strategy == 'GB':
         start_date = pd.to_datetime('2021-01-31')
         df = df[df['date'] >= start_date].copy()
     
@@ -249,11 +249,15 @@ def create_growth_chart(data):
     if strategy == 'GA':
         df['ga_cumulative'] = initial_investment * (1 + df['ga_returns_net']).cumprod()
         strategy_col = 'ga_cumulative'
+        benchmark_col = 'portfolio_60_40'
+        benchmark_name = 'Global 60/40'
     else:
         df['strategy_cumulative'] = initial_investment * (1 + df[returns_col]).cumprod()
         strategy_col = 'strategy_cumulative'
+        benchmark_col = 'agg'
+        benchmark_name = 'AGG'
     
-    df['benchmark_60_40'] = initial_investment * (1 + df['portfolio_60_40']).cumprod()
+    df['benchmark'] = initial_investment * (1 + df[benchmark_col]).cumprod()
     
     fig = go.Figure()
     
@@ -268,9 +272,9 @@ def create_growth_chart(data):
 
     fig.add_trace(go.Scatter(
         x=df['date'],
-        y=df['benchmark_60_40'],
+        y=df['benchmark'],
         mode='lines',
-        name='Global 60/40',
+        name=benchmark_name,
         line=dict(color='#6b7280', width=2),  # Grey
         hovertemplate='Date: %{x}<br>Value: $%{y:,.0f}<extra></extra>'
     ))   
@@ -358,16 +362,54 @@ def create_trailing_12m_allocations_chart(data):
     
     fig = go.Figure()
     
-    colors = {
-        'SP500': '#80c1ff',  
-        'Gold': '#4da6ff',   
-        'US_REITs': '#337fcc',  
-        'US_LT_Treas': '#1a5fb4', 
-        'Intl_Dev_Stocks': '#00509e', 
-        'EM_Stocks': '#004080', 
-        'Commodities': '#003366', 
-        'Cash': '#001f3f' 
-    }
+    # Different color schemes based on strategy
+    if data.get('strategy') == 'GB':
+        # Structured color palette by asset class for GB
+        colors = {
+            # U.S. Equities (Green family - growth theme)
+            'SP500': '#0B7A3E',
+            
+            # International Developed Equities (Purple family)
+            'Europe_Stocks': '#5B3FA8',
+            'Japan_Stocks': '#7A5BCC',
+            'Intl_Dev_Stocks': '#A48AE8',
+            
+            # Emerging Markets (Warm reds)
+            'EM_Stocks': '#B43D3D',
+            
+            # Real Estate REITs (Orange family)
+            'US_REITs': '#C76B2E',
+            'Intl_REITs': '#E19248',
+            
+            # Government Bonds (Blue family)
+            'US_LT_Treas': '#133F73',
+            'Intermediate_Bonds': '#5A8FD8',
+            'TIPS': '#1D5F8A',
+            
+            # Corporate/Aggregate Bonds (Teal family)
+            'Agg_Bonds': '#1F6F6E',
+            'Intl_Bonds': '#79D0C1',
+            
+            # Commodities & Precious Metals (Gold/brown tones)
+            'Commodities': '#A47C1B',
+            'Gold': '#E3C448',
+            
+            # Cash (Gray - neutral)
+            'Cash': '#4F4F4F',
+            'IAGG': '#2A8F8C'
+        }
+    else:
+        # Original blue palette for GA
+        colors = {
+            'SP500': '#80c1ff',  
+            'Gold': '#4da6ff',   
+            'US_REITs': '#337fcc',  
+            'US_LT_Treas': '#1a5fb4', 
+            'Intl_Dev_Stocks': '#00509e', 
+            'EM_Stocks': '#004080', 
+            'Commodities': '#003366', 
+            'Cash': '#001f3f' 
+        }
     
     column_order = ['Commodities', 'EM_Stocks', 'Gold', 'Intl_Dev_Stocks', 'SP500', 'US_LT_Treas', 'US_REITs', 'Cash']
     available_columns = [col for col in column_order if col in pivot_df.columns]
@@ -389,7 +431,15 @@ def create_trailing_12m_allocations_chart(data):
         'Intl_Dev_Stocks': 'Intl. Dev. Stocks',
         'EM_Stocks': 'EM Stocks',
         'Commodities': 'Commodities',
-        'Gold': 'Gold'
+        'Gold': 'Gold',
+        # GB-specific assets
+        'Agg_Bonds': 'Agg Bonds',
+        'Europe_Stocks': 'Europe Stocks',
+        'Intermediate_Bonds': 'Intermediate Bonds',
+        'Intl_Bonds': 'Intl Bonds',
+        'Intl_REITs': 'Intl REITs',
+        'Japan_Stocks': 'Japan Stocks',
+        'TIPS': 'TIPS'
     }
 
     for asset in final_columns:
@@ -458,7 +508,7 @@ def create_monthly_returns_chart(data):
         row=2, col=1
     )
     
-    strategy_name = strategy if strategy == 'GA' else 'GBE'
+    strategy_name = strategy if strategy == 'GA' else 'GB'
     fig.update_layout(
         height=700,
         showlegend=False,
@@ -467,14 +517,23 @@ def create_monthly_returns_chart(data):
     
     return fig
 
-def create_benchmark_performance_chart(data):
+def create_benchmark_performance_chart(data, strategy='GA'):
     """Create Benchmark Performance comparison with blue theme and professional styling"""
     df = data['benchmark_performance'].copy()
     
+    # Filter to show only strategy and its primary benchmark
+    if strategy == 'GA':
+        df = df[df['portfolio'].isin(['GA', '60/40'])]
+    elif strategy == 'GB':
+        df = df[df['portfolio'].isin(['GB', 'AGG'])]
+    
     portfolio_colors = {
         'GA': "#1e3a8a",       # Dark blue for GA
+        'GB': "#7c3aed",      # Purple for GB
         '60/40': "#15803d",    # Dark green for 60/40
-        '70/30': "#6b7280"     # Gray for 70/30
+        '70/30': "#6b7280",    # Gray for 70/30
+        '50/50': "#ea580c",    # Orange for 50/50
+        'AGG': "#0891b2"       # Cyan for AGG
     }
     
     time_period_colors = ["#0B3C7D", "#1D5BBF", "#3C82F6", "#93B4FF"]  # YTD, 1Y, 5Y, SI
@@ -595,9 +654,38 @@ def create_benchmark_performance_chart(data):
         uniformtext_mode="show"
     )
     
-    # Update y-axes with fixed ranges, titles, and styling
+    # Calculate dynamic ranges with padding for text labels
+    # Returns - handle both positive and negative values
+    returns_min = min((df['ytd'] * 100).min(), (df['one_year'] * 100).min(), 
+                      (df['five_year'] * 100).min(), (df['since_inception'] * 100).min())
+    returns_max = max((df['ytd'] * 100).max(), (df['one_year'] * 100).max(), 
+                      (df['five_year'] * 100).max(), (df['since_inception'] * 100).max())
+    returns_padding = (returns_max - returns_min) * 0.15  # 15% padding
+    returns_range = [returns_min - returns_padding if returns_min < 0 else 0, 
+                     returns_max + returns_padding]
+    
+    # Volatility - always non-negative, ensure proper padding
+    volatility_min = (df['standard_deviation'] * 100).min()
+    volatility_max = (df['standard_deviation'] * 100).max()
+    volatility_padding = (volatility_max - volatility_min) * 0.15
+    volatility_range = [0, volatility_max + volatility_padding]
+    
+    # Sharpe Ratio - can be negative, handle accordingly
+    sharpe_min = df['sharpe_ratio'].min()
+    sharpe_max = df['sharpe_ratio'].max()
+    sharpe_padding = (sharpe_max - sharpe_min) * 0.15
+    sharpe_range = [sharpe_min - sharpe_padding if sharpe_min < 0 else 0, 
+                    sharpe_max + sharpe_padding]
+    
+    # Beta - typically positive but can vary
+    beta_min = df['beta_to_sp500'].min()
+    beta_max = df['beta_to_sp500'].max()
+    beta_padding = (beta_max - beta_min) * 0.15
+    beta_range = [max(0, beta_min - beta_padding), beta_max + beta_padding]
+    
+    # Update y-axes with dynamic ranges, titles, and styling
     fig.update_yaxes(
-        range=[0, 18],
+        range=returns_range,
         title_text="Returns (%)",
         tickformat=".1f",
         gridcolor="rgba(15,23,42,0.08)",
@@ -607,7 +695,7 @@ def create_benchmark_performance_chart(data):
     )
     
     fig.update_yaxes(
-        range=[8, 14], 
+        range=volatility_range, 
         title_text="Volatility (%)",
         tickformat=".1f",
         gridcolor="rgba(15,23,42,0.08)",
@@ -617,7 +705,7 @@ def create_benchmark_performance_chart(data):
     )
     
     fig.update_yaxes(
-        range=[0.5, 1.0], 
+        range=sharpe_range, 
         title_text="Sharpe Ratio",
         tickformat=".2f",
         gridcolor="rgba(15,23,42,0.08)",
@@ -627,7 +715,7 @@ def create_benchmark_performance_chart(data):
     )
     
     fig.update_yaxes(
-        range=[0.3, 0.9], 
+        range=beta_range, 
         title_text="Beta",
         tickformat=".2f",
         gridcolor="rgba(15,23,42,0.08)",
@@ -701,17 +789,56 @@ def create_attribution_chart(data):
     
     fig = go.Figure()
     
-    # Color palette for assets (matching the allocation chart)
-    colors = {
-        'SP500': '#80c1ff',  
-        'Gold': '#4da6ff',   
-        'US_REITs': '#337fcc',  
-        'US_LT_Treas': '#1a5fb4', 
-        'Intl_Dev_Stocks': '#00509e', 
-        'EM_Stocks': '#004080', 
-        'Commodities': '#003366', 
-        'Cash': '#001f3f' 
-    }
+    # Determine strategy from data context
+    strategy = data.get('strategy', 'GA')
+    
+    if strategy == 'GB':
+        # Structured color palette by asset class for GB (matching other charts)
+        colors = {
+            # U.S. Equities (Green)
+            'SP500': '#0B7A3E',
+            
+            # International Developed Equities (Purple family)
+            'Europe_Stocks': '#5B3FA8',
+            'Japan_Stocks': '#7A5BCC',
+            'Intl_Dev_Stocks': '#A48AE8',
+            
+            # Emerging Markets (Warm red)
+            'EM_Stocks': '#B43D3D',
+            
+            # Real Estate REITs (Orange family)
+            'US_REITs': '#C76B2E',
+            'Intl_REITs': '#E19248',
+            
+            # Government Bonds (Blue family)
+            'US_LT_Treas': '#133F73',
+            'Intermediate_Bonds': '#5A8FD8',
+            'TIPS': '#1D5F8A',
+            
+            # Corporate/Aggregate Bonds (Teal family)
+            'Agg_Bonds': '#1F6F6E',
+            'Intl_Bonds': '#79D0C1',
+            
+            # Commodities & Precious Metals (Gold/brown)
+            'Commodities': '#A47C1B',
+            'Gold': '#E3C448',
+            
+            # Cash (Gray)
+            'Cash': '#4F4F4F',
+            'IAGG': '#2A8F8C'
+        }
+    else:
+        # Original blue palette for GA
+        colors = {
+            'SP500': '#80c1ff',  
+            'Gold': '#4da6ff',   
+            'US_REITs': '#337fcc',  
+            'US_LT_Treas': '#1a5fb4', 
+            'Intl_Dev_Stocks': '#00509e', 
+            'EM_Stocks': '#004080', 
+            'Commodities': '#003366', 
+            'Cash': '#001f3f' 
+        }
     
     column_order = ['Commodities', 'EM_Stocks', 'Gold', 'Intl_Dev_Stocks', 'SP500', 'US_LT_Treas', 'US_REITs', 'Cash']
     available_columns = [col for col in column_order if col in pivot_df.columns]
@@ -767,7 +894,7 @@ def calculate_ga_performance_metrics(data_dict):
     strategy = data_dict.get('strategy', 'GA')
     returns_col = data_dict.get('returns_column', 'ga_returns_net')
 
-    # For GA, use GA benchmark. For GBE, calculate metrics from monthly returns
+    # For GA, use GA benchmark. For GB, calculate metrics from monthly returns
     if strategy == 'GA':
         ga_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GA']
         
@@ -801,7 +928,7 @@ def calculate_ga_performance_metrics(data_dict):
                 'downside_deviation': 0.0
             }
     
-    # For GBE, calculate all metrics from monthly returns
+    # For GB, calculate all metrics from monthly returns
     df = monthly_returns_df.copy()
     df['date'] = pd.to_datetime(df['date'])
     
@@ -863,10 +990,10 @@ def calculate_ga_performance_metrics(data_dict):
     else:
         three_year_return = None  # Not enough data
     
-    # 5-Year - need at least 54 months
+    # 5-Year - need at least 48 months (4 years) to estimate 5-year annualized
     five_years_ago = current_date - timedelta(days=5*365.25)
     five_year_data = returns[df['date'] >= five_years_ago]
-    if len(five_year_data) >= 54:
+    if len(five_year_data) >= 48:
         five_year_total = (1 + five_year_data).prod() - 1
         years = len(five_year_data) / 12
         five_year_return = (1 + five_year_total) ** (1/years) - 1 if years > 0 else 0
@@ -885,7 +1012,7 @@ def calculate_ga_performance_metrics(data_dict):
     if len(returns) >= 12:
         std_dev = returns.std() * np.sqrt(12)
     else:
-        std_dev = None  # Not enough data for annualized volatility
+        std_dev = None  # Not enough data for annualized vo latility
     
     # Sharpe ratio - need both return and volatility
     if std_dev is not None and std_dev > 0:
@@ -958,7 +1085,15 @@ def create_allocation_pie_chart(data):
         'Intl_Dev_Stocks': 'International Developed Stocks',
         'EM_Stocks': 'Emerging Market Stocks',
         'Commodities': 'Commodities',
-        'Gold': 'Gold'
+        'Gold': 'Gold',
+        # GB-specific assets
+        'Agg_Bonds': 'Agg Bonds',
+        'Europe_Stocks': 'Europe Stocks',
+        'Intermediate_Bonds': 'Intermediate Bonds',
+        'Intl_Bonds': 'Intl Bonds',
+        'Intl_REITs': 'Intl REITs',
+        'Japan_Stocks': 'Japan Stocks',
+        'TIPS': 'TIPS'
     }
     
     # Handle case where latest_date is NaT (no valid dates)
@@ -974,23 +1109,63 @@ def create_allocation_pie_chart(data):
     # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
     latest_allocation = latest_allocation.groupby('display_name')['allocation_percentage'].sum().reset_index()
     
-    colors = {
-        'SP500': '#80c1ff',  
-        'Gold': '#4da6ff',   
-        'US_REITs': '#337fcc',  
-        'US_LT_Treas': '#1a5fb4', 
-        'Intl_Dev_Stocks': '#00509e', 
-        'EM_Stocks': '#004080', 
-        'Commodities': '#003366', 
-        'Cash': '#001f3f',
-        'U.S. Stocks (S&P 500)': '#80c1ff',
-        'Gold': '#4da6ff',
-        'U.S. Real Estate (REITs)': '#337fcc',
-        'International Developed Stocks': '#00509e',
-        'Emerging Market Stocks': '#004080',
-        'Commodities': '#003366',
-        'Cash': '#1a5fb4'
-    }
+    # Determine strategy from data context
+    strategy = data.get('strategy', 'GA')
+    
+    if strategy == 'GB':
+        # Structured color palette by asset class for GB (matching trailing 12m chart)
+        colors = {
+            # U.S. Equities (Green)
+            'U.S. Stocks (S&P 500)': '#0B7A3E',
+            'SP500': '#0B7A3E',
+            
+            # International Developed Equities (Purple family)
+            'Europe Stocks': '#5B3FA8',
+            'Japan Stocks': '#7A5BCC',
+            'International Developed Stocks': '#A48AE8',
+            'Intl_Dev_Stocks': '#A48AE8',
+            
+            # Emerging Markets (Warm red)
+            'Emerging Market Stocks': '#B43D3D',
+            'EM_Stocks': '#B43D3D',
+            
+            # Real Estate REITs (Orange family)
+            'U.S. Real Estate (REITs)': '#C76B2E',
+            'US_REITs': '#C76B2E',
+            'Intl REITs': '#E19248',
+            
+            # Government Bonds (Blue family)
+            'U.S. LT Treas': '#133F73',
+            'Intermediate Bonds': '#5A8FD8',
+            'TIPS': '#1D5F8A',
+            
+            # Corporate/Aggregate Bonds (Teal family)
+            'Agg Bonds': '#1F6F6E',
+            'Intl Bonds': '#79D0C1',
+            
+            # Commodities & Precious Metals (Gold/brown)
+            'Commodities': '#A47C1B',
+            'Gold': '#E3C448',
+            
+            # Cash (Gray)
+            'Cash': '#4F4F4F'
+        }
+    else:
+        # Original blue palette for GA
+        colors = {
+            'U.S. Stocks (S&P 500)': '#80c1ff',
+            'SP500': '#80c1ff',
+            'Gold': '#4da6ff',
+            'U.S. Real Estate (REITs)': '#337fcc',
+            'US_REITs': '#337fcc',
+            'U.S. LT Treas': '#1a5fb4',
+            'International Developed Stocks': '#00509e',
+            'Intl_Dev_Stocks': '#00509e',
+            'Emerging Market Stocks': '#004080',
+            'EM_Stocks': '#004080',
+            'Commodities': '#003366',
+            'Cash': '#001f3f'
+        }
     
     # Create color list based on display names in the data
     pie_colors = [colors.get(name, '#1f77b4') for name in latest_allocation['display_name']]
@@ -1028,12 +1203,12 @@ def main():
     
     strategy = st.sidebar.selectbox(
         "Select Strategy",
-        ["Global Adaptive (GA)", "Global Balance & Equity (GBE)"],
+        ["Global Adaptive (GA)", "Global Balanced (GB)"],
         index=0
     )
     
     # Parse strategy code
-    strategy_code = 'GA' if 'GA' in strategy else 'GBE'
+    strategy_code = 'GA' if 'GA' in strategy else 'GB'
     
     data = load_data(strategy_code)
     
@@ -1058,7 +1233,7 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
     import base64
     import os
     
-    strategy_title = "GLOBAL ADAPTIVE" if strategy == 'GA' else "GLOBAL BALANCE & EQUITY"
+    strategy_title = "GLOBAL ADAPTIVE" if strategy == 'GA' else "GLOBAL BALANCED"
     
     logo_html = ""
     if os.path.exists("logo.png"):
@@ -1138,14 +1313,20 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
             <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">STRATEGY OVERVIEW</h2>
         </div>
         """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        Global Adaptive (GA) is designed to meet the challenges of today's ever-changing markets by allocating capital across major global asset classes through a disciplined, data-driven process. Traditional approaches, such as the 60/40 stock-bond portfolio, rely on static assumptions that may leave investors overexposed when conditions shift.
-        
-        Instead, GA takes a dynamic approach. By continuously evaluating global opportunities, the strategy seeks to increase exposure to asset classes showing strength while reducing or avoiding those losing momentum. This adaptability allows the portfolio to respond proactively rather than reactively, providing the potential for stronger risk-adjusted returns over time.
-        
-        Through this evidence-based framework, GA strives to deliver three key benefits: more consistent growth, enhanced stability, and improved capital preservation. The result is a portfolio designed not only to participate in market gains, but also to better withstand periods of stress — an advantage that can compound meaningfully for investors over the long run.
-        """)
+
+        #To scale, we would replace the else with elif, and keep adding more strategies
+        if strategy == 'GA':
+            st.markdown("""
+            Global Adaptive (GA) is designed to meet the challenges of today's ever-changing markets by allocating capital across major global asset classes through a disciplined, data-driven process. Traditional approaches, such as the 60/40 stock-bond portfolio, rely on static assumptions that may leave investors overexposed when conditions shift.
+            
+            Instead, GA takes a dynamic approach. By continuously evaluating global opportunities, the strategy seeks to increase exposure to asset classes showing strength while reducing or avoiding those losing momentum. This adaptability allows the portfolio to respond proactively rather than reactively, providing the potential for stronger risk-adjusted returns over time.
+            
+            Through this evidence-based framework, GA strives to deliver three key benefits: more consistent growth, enhanced stability, and improved capital preservation. The result is a portfolio designed not only to participate in market gains, but also to better withstand periods of stress — an advantage that can compound meaningfully for investors over the long run.
+            """)
+        else: 
+            st.markdown("""
+            Global Balanced (GB) is a diversified portfolio strategy that invests in major asset classes globally through liquid exchanged traded funds (ETFs). GB takes a dynamic, all-weather approach to portfolio construction in order to seek out more stable performance across economic environments. The strategy targets a conservative capital appreciation profile while minimizing portfolio volatility and risk through enhanced diversification and portfolio balancing techniques.
+            """)
         
         st.plotly_chart(create_growth_chart(data), use_container_width=True)
         
@@ -1161,45 +1342,59 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
         
         benchmark_data = data['benchmark_performance'].copy()
         
-        strategy_display_name = 'RQA Global Adaptive' if strategy == 'GA' else 'RQA Global Balance & Equity'
+        strategy_display_name = 'RQA Global Adaptive' if strategy == 'GA' else 'RQA Global Balanced'
         
-        global_6040 = benchmark_data[benchmark_data['portfolio'] == '60/40'].iloc[0] if not benchmark_data.empty else None
+        # Select benchmark portfolio based on strategy
+        if strategy == 'GA':
+            benchmark_portfolio = '60/40'
+            benchmark_display_name = 'Global 60/40'
+            benchmark_col = 'portfolio_60_40'
+        elif strategy == 'GB':  
+            benchmark_portfolio = 'AGG'
+            benchmark_display_name = 'AGG'
+            benchmark_col = 'agg'
         
-        # Calculate 3-year return for 60/40 from monthly returns data
+        benchmark_perf = benchmark_data[benchmark_data['portfolio'] == benchmark_portfolio].iloc[0] if not benchmark_data.empty else None
+        
+        # Calculate 3-year and 5-year returns for benchmarks from monthly returns data
         monthly_returns_df = data['monthly_returns']
         df = monthly_returns_df.copy()
         df['date'] = pd.to_datetime(df['date'])
         current_date = df['date'].max()
         three_years_ago = current_date - timedelta(days=3*365.25)
+        five_years_ago = current_date - timedelta(days=5*365.25)
         three_year_data = df[df['date'] >= three_years_ago]
+        five_year_data = df[df['date'] >= five_years_ago]
         
+        # Calculate 3-year for main benchmark
         if len(three_year_data) >= 24:
-            three_year_total_return_6040 = (1 + three_year_data['portfolio_60_40']).prod() - 1
+            three_year_total_return_benchmark = (1 + three_year_data[benchmark_col]).prod() - 1
             years = len(three_year_data) / 12
-            three_year_annualized_6040 = (1 + three_year_total_return_6040) ** (1/years) - 1 if years > 0 else 0
+            three_year_annualized_benchmark = (1 + three_year_total_return_benchmark) ** (1/years) - 1 if years > 0 else 0
         else:
-            three_year_annualized_6040 = 0.0
+            three_year_annualized_benchmark = 0.0
+        
+        # Calculate 5-year for main benchmark
+        if len(five_year_data) >= 48:
+            five_year_total_return_benchmark = (1 + five_year_data[benchmark_col]).prod() - 1
+            years = len(five_year_data) / 12
+            five_year_annualized_benchmark = (1 + five_year_total_return_benchmark) ** (1/years) - 1 if years > 0 else None
+        else:
+            five_year_annualized_benchmark = None
         
         performance_data = {
-            '': [strategy_display_name, 'Global 60/40'],
+            '': [strategy_display_name, benchmark_display_name],
             'YTD': [f"{ga_metrics['ytd']*100:.1f}%" if ga_metrics['ytd'] is not None else "N/A", 
-                   f"{global_6040['ytd']*100:.1f}%" if global_6040 is not None else "N/A"],
+                   f"{benchmark_perf['ytd']*100:.1f}%" if benchmark_perf is not None else "N/A"],
             '1 Year': [f"{ga_metrics['one_year']*100:.1f}%" if ga_metrics['one_year'] is not None else "N/A", 
-                      f"{global_6040['one_year']*100:.1f}%" if global_6040 is not None else "N/A"],
+                      f"{benchmark_perf['one_year']*100:.1f}%" if benchmark_perf is not None else "N/A"],
             '3 Year': [f"{ga_metrics['three_year']*100:.1f}%" if ga_metrics['three_year'] is not None else "N/A", 
-                      f"{three_year_annualized_6040*100:.1f}%"],
+                      f"{three_year_annualized_benchmark*100:.1f}%"],
+            '5 Year': [f"{ga_metrics['five_year']*100:.1f}%" if ga_metrics['five_year'] is not None else "N/A", 
+                      f"{five_year_annualized_benchmark*100:.1f}%" if five_year_annualized_benchmark is not None else "N/A"],
             'Since Inception': [f"{ga_metrics['since_inception']*100:.1f}%" if ga_metrics['since_inception'] is not None else "N/A", 
-                              f"{global_6040['since_inception']*100:.1f}%" if global_6040 is not None else "N/A"]
+                              f"{benchmark_perf['since_inception']*100:.1f}%" if benchmark_perf is not None else "N/A"]
         }
-        
-        # Add 5 Year column only for GA strategy
-        if strategy == 'GA':
-            performance_data['5 Year'] = [f"{ga_metrics['five_year']*100:.1f}%" if ga_metrics['five_year'] is not None else "N/A", 
-                      f"{global_6040['five_year']*100:.1f}%" if global_6040 is not None else "N/A"]
-            # Reorder columns to put 5 Year before Since Inception
-            column_order = ['', 'YTD', '1 Year', '3 Year', '5 Year', 'Since Inception']
-            performance_data = {k: performance_data[k] for k in column_order}
-        
         df_performance = pd.DataFrame(performance_data)
         st.dataframe(df_performance, hide_index=True, use_container_width=True)
         
@@ -1222,18 +1417,77 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
         def fmt_ratio(val):
             return f"{val:.2f}" if val is not None else "N/A"
         
+        # Both GA and GB now have 2 columns (strategy + benchmark)
         risk_data = {
             'Metric': ['Annualized Volatility', 'Sharpe Ratio (RF=0)', 'Beta (vs. S&P)'],
             strategy: [fmt_pct(ga_metrics.get('standard_deviation')), 
                        fmt_ratio(ga_metrics.get('sharpe_ratio')), 
                        fmt_ratio(ga_metrics.get('beta_to_sp500'))],
-            'Global 60/40': [fmt_pct(global_6040['standard_deviation']) if global_6040 is not None else "N/A",
-                            fmt_ratio(global_6040['sharpe_ratio']) if global_6040 is not None else "N/A",
-                            fmt_ratio(global_6040['beta_to_sp500']) if global_6040 is not None else "N/A"]
+            benchmark_display_name: [fmt_pct(benchmark_perf['standard_deviation']) if benchmark_perf is not None else "N/A",
+                            fmt_ratio(benchmark_perf['sharpe_ratio']) if benchmark_perf is not None else "N/A",
+                            fmt_ratio(benchmark_perf['beta_to_sp500']) if benchmark_perf is not None else "N/A"]
         }
         
         df_risk = pd.DataFrame(risk_data)
         st.dataframe(df_risk, hide_index=True, use_container_width=True)
+        
+        # Key Strategy Features (move above Portfolio Management)
+        st.markdown("""
+        <div style="background: #3b5998; color: white; padding: 0.9rem 1.4rem; border-radius: 8px; margin: 1rem 0 0.4rem 0;">
+            <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if strategy == 'GA':
+            st.markdown("""
+            <ul style="list-style:none; padding:0; margin:0 0 1rem 0;">
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Tactical Asset Allocation</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Global Diversification</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Systematic Risk Management</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Daily Liquidity</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Monthly Rebalancing</span>
+                </li>
+            </ul>
+            """, unsafe_allow_html=True)
+        else:  # GB
+            st.markdown("""
+            <ul style="list-style:none; padding:0; margin:0 0 1rem 0;">
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Global Asset Allocation</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Intelligently Balanced</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Evolves with the Market</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">"Quantamental"</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Diversification First</span>
+                </li>
+            </ul>
+            """, unsafe_allow_html=True)
         
         # Portfolio Management with consistent header format
         st.markdown("""
@@ -1279,28 +1533,52 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("""
-        **INCEPTION DATE:**  
-        July 2019
+        if strategy == 'GA':
+            st.markdown("""
+            **INCEPTION DATE:**  
+            July 2019
+            
+            **STYLE:**  
+            Multi-Asset & Dynamic Global Allocation
         
-        **STYLE:**  
-        Multi-Asset & Dynamic Global Allocation
-        
-        **BENCHMARK:**  
-        Global 60/40 "60% ACWI / 40% AGG"
-        
-        **ASSET UNIVERSE:**  
-        U.S. Equities, Developed & Emerging Market Equities, Global Real Estate Investment Trusts (REIT’s), Global Bonds, U.S. Treasuries, Precious Metals, and Global Commodity Composites
-        
-        **OFFERING VEHICLE:**  
-        Separately Managed Accounts & Custom Model Delivery
-        
-        **INVESTOR AVAILABILITY:**  
-        Unaccredited & Qualified
-        
-        **LIQUIDITY:**  
-        Daily via ETF holdings
-        """)
+            **BENCHMARK:**  
+            Global 60/40 "60% ACWI / 40% AGG"
+            
+            **ASSET UNIVERSE:**  
+            U.S. Equities, Developed & Emerging Market Equities, Global Real Estate Investment Trusts (REIT’s), Global Bonds, U.S. Treasuries, Precious Metals, and Global Commodity Composites
+            
+            **OFFERING VEHICLE:**  
+            Separately Managed Accounts & Custom Model Delivery
+            
+            **INVESTOR AVAILABILITY:**  
+            Unaccredited & Qualified
+            
+            **LIQUIDITY:**  
+            Daily via ETF holdings
+                """)
+        else:  # GB
+            st.markdown("""
+            **INCEPTION DATE:**  
+            January 2019
+            
+            **STYLE:**  
+            Multi-Asset
+            
+            **BENCHMARK:**  
+            AGG (U.S. Aggregate Bond)
+            
+            **ASSET UNIVERSE:**  
+            U.S. Equities, Developed & Emerging Market Equities, Global Real Estate Investment Trusts (REIT's), Global Bonds, U.S. Treasuries, Precious Metals, and Global Commodity Composites
+            
+            **OFFERING VEHICLE:**  
+            Separately Managed Accounts & Index Delivery
+            
+            **INVESTOR AVAILABILITY:**  
+            Unaccredited & Qualified
+            
+            **LIQUIDITY:**  
+            Daily via ETF holdings
+            """)
         
         # Current allocation section with consistent header format
         st.markdown("""
@@ -1339,6 +1617,15 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
                 'Commodities': 'Commodities',
                 'Gold': 'Gold',
                 'Cash': 'Cash',
+                # GB-specific assets
+                'Agg_Bonds': 'Agg Bonds',
+                'Europe_Stocks': 'Europe Stocks',
+                'Intermediate_Bonds': 'Intermediate Bonds',
+                'Intl_Bonds': 'Intl Bonds',
+                'Intl_REITs': 'Intl REITs',
+                'Japan_Stocks': 'Japan Stocks',
+                'TIPS': 'TIPS',
+                # ETF full names
                 'SPDR Portfolio S&P 500 ETF': 'U.S. Stocks (S&P 500)',
                 'iShares Gold Trust': 'Gold',
                 'Vanguard FTSE Developed Markets ETF': 'International Developed Stocks',
@@ -1381,35 +1668,6 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
-    
-        # Key Strategy Features (standard header, icon bullets, no box outline)
-        st.markdown("""
-        <div style="background: #3b5998; color: white; padding: 0.9rem 1.4rem; border-radius: 8px; margin: 0.5rem 0 0.4rem 0;">
-            <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
-        </div>
-        <ul style="list-style:none; padding:0; margin:0 0 0.5rem 0;">
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                <span style="line-height:1.15;">Tactical Asset Allocation</span>
-            </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                <span style="line-height:1.15;">Global Diversification</span>
-            </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                <span style="line-height:1.15;">Systematic Risk Management</span>
-            </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                <span style="line-height:1.15;">Daily Liquidity</span>
-            </li>
-            <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem;">
-                <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                <span style="line-height:1.15;">Monthly Rebalancing</span>
-            </li>
-        </ul>
-        """, unsafe_allow_html=True)
 
 
 
@@ -1631,7 +1889,7 @@ def create_analytics_dashboard(data, ga_metrics, strategy='GA'):
             <h2 style="color: white; margin: 0; font-size: 1.8rem; font-weight: bold;">BENCHMARK PERFORMANCE COMPARISON</h2>
         </div>
         """, unsafe_allow_html=True)
-        st.plotly_chart(create_benchmark_performance_chart(data), use_container_width=True)
+        st.plotly_chart(create_benchmark_performance_chart(data, strategy), use_container_width=True)
         
         
     

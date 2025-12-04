@@ -13,9 +13,23 @@ import gzip
 import io
 import csv
 from xml.etree import ElementTree as ET
+import toml
 
 class GAMonthlyUpdater:
     """Integrated GA monthly data processor"""
+    
+    def _load_secrets(self):
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                return dict(st.secrets)
+        except:
+            pass
+        
+        if os.path.exists('secrets.toml'):
+            return toml.load('secrets.toml')
+        
+        raise FileNotFoundError("No secrets.toml file found")
     
     def __init__(self):
         self.etf_mapping = {
@@ -33,13 +47,17 @@ class GAMonthlyUpdater:
         
         self.canonical_etfs = ["PDBC", "VWO", "IAU", "VEA", "SPY", "SPTL", "VNQ", "USFR"]
         
-        # IBKR API Configuration
-        self.flex_token = "158159079699491281111623"
-        self.query_id = "1303095"
+        # IBKR API Configuration - Load from secrets
+        secrets = self._load_secrets()
+        self.flex_token = secrets.get('ibkr_ga', {}).get('flex_token', '')
+        self.query_id = secrets.get('ibkr_ga', {}).get('query_id', '')
+        self.primary_account = secrets.get('ibkr_ga', {}).get('primary_account', '')
+        
+        if not all([self.flex_token, self.query_id, self.primary_account]):
+            raise ValueError("IBKR GA credentials not found in secrets.toml")
+        
         self.send_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
         self.get_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
-        
-        self.primary_account = "U1250237"
     
     def fetch_flex_data_direct(self):
         """Fetch flex data directly from IBKR API without file intermediates"""

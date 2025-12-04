@@ -32,6 +32,29 @@ env/
 # Streamlit
 .streamlit/
 
+# Confidential Data Files
+*.xlsx
+*.xls
+*.csv
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets and API Keys
+secrets.toml
+*.toml
+!streamlit_secrets_template.toml
+
+# Backup Files
+*_backup_*.xlsx
+*_backup_*.csv
+
+# Debug Files
+debug_*.csv
+debug_*.txt
+
+# Log Files
+*.log
 
 # PDF files (fact sheets, reports)
 *.pdf

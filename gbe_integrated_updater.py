@@ -13,9 +13,24 @@ import gzip
 import io
 import csv
 from xml.etree import ElementTree as ET
+import toml
 
 class GBEMonthlyUpdater:
     """Integrated GBE monthly data processor"""
+    
+    def _load_secrets(self):
+        """Load secrets from secrets.toml or Streamlit secrets"""
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets'):
+                return dict(st.secrets)
+        except:
+            pass
+        
+        if os.path.exists('secrets.toml'):
+            return toml.load('secrets.toml')
+        
+        raise FileNotFoundError("No secrets.toml file found and not running in Streamlit")
     
     def __init__(self):
         # GBE ETF mapping - aggregates multiple ETFs into canonical asset classes
@@ -84,13 +99,17 @@ class GBEMonthlyUpdater:
         # 14 ETFs matching the actual positions in the portfolio
         self.canonical_etfs = ["PDBC", "VWO", "IEV", "BWX", "IAU", "VEA", "RWX", "EWJ", "BIV", "SPY", "TIP", "BND", "SPTL", "VNQ"]
         
-        # IBKR API Configuration
-        self.flex_token = "158159079699491281111623"
-        self.query_id = "1303095"
-        self.send_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
-        self.get_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
+        # IBKR API Configuration - Load from secrets
+        secrets = self._load_secrets()
+        self.flex_token = secrets.get('ibkr_gbe', {}).get('flex_token', '')
+        self.query_id = secrets.get('ibkr_gbe', {}).get('query_id', '')
+        self.primary_account = secrets.get('ibkr_gbe', {}).get('primary_account', '')
         
-        self.primary_account = "U1250237" 
+        if not all([self.flex_token, self.query_id, self.primary_account]):
+            raise ValueError("IBKR GBE credentials not found in secrets.toml")
+        
+        self.send_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
+        self.get_url = "https://www.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement" 
     
     def fetch_flex_data_direct(self):
         """Fetch flex data directly from IBKR API without file intermediates"""
@@ -400,7 +419,7 @@ class GBEMonthlyUpdater:
         
         return pd.DataFrame([row_data])
     
-    def update_excel_surgical(self, gbe_df, excel_file="GBE.xlsx"):
+    def update_excel_surgical(self, gbe_df, excel_file="GBEv3.xlsx"):
         """Surgically update Excel file with GBE data"""
         
         print(f"\nUpdating Excel file: {excel_file}")
