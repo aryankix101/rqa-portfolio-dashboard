@@ -98,10 +98,10 @@ def load_data_postgres(strategy='GA'):
     
     # Determine table names based on strategy
     if strategy == 'GB':
-        returns_table = 'GB_monthly_returns'
-        allocations_table = 'GB_allocations'
-        attribution_table = 'GB_attribution'
-        returns_col = 'GB_returns_net'
+        returns_table = 'gbe_monthly_returns'
+        allocations_table = 'gbe_allocations'
+        attribution_table = 'gbe_attribution'
+        returns_col = 'gbe_returns_net'
     else:  # GA
         returns_table = 'monthly_returns'
         allocations_table = 'ga_allocations'
@@ -165,10 +165,10 @@ def load_data_sqlite(strategy='GA'):
     
     # Determine table names based on strategy
     if strategy == 'GB':
-        returns_table = 'GB_monthly_returns'
-        allocations_table = 'GB_allocations'
-        attribution_table = 'GB_attribution'
-        returns_col = 'GB_returns_net'
+        returns_table = 'gbe_monthly_returns'
+        allocations_table = 'gbe_allocations'
+        attribution_table = 'gbe_attribution'
+        returns_col = 'gbe_returns_net'
     else:  # GA
         returns_table = 'monthly_returns'
         allocations_table = 'ga_allocations'
