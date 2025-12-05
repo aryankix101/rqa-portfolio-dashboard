@@ -525,11 +525,11 @@ def create_benchmark_performance_chart(data, strategy='GA'):
     if strategy == 'GA':
         df = df[df['portfolio'].isin(['GA', '60/40'])]
     elif strategy == 'GB':
-        df = df[df['portfolio'].isin(['GB', 'AGG'])]
+        df = df[df['portfolio'].isin(['GBE', 'AGG'])]  # Database uses GBE, not GB
     
     portfolio_colors = {
         'GA': "#1e3a8a",       # Dark blue for GA
-        'GB': "#7c3aed",      # Purple for GB
+        'GBE': "#7c3aed",      # Purple for GBE
         '60/40': "#15803d",    # Dark green for 60/40
         '70/30': "#6b7280",    # Gray for 70/30
         '50/50': "#ea580c",    # Orange for 50/50
@@ -547,7 +547,13 @@ def create_benchmark_performance_chart(data, strategy='GA'):
     
     portfolios = df['portfolio'].tolist()
     
-    portfolio_display_names = ['GA' if p == 'GA' else p for p in portfolios]
+    # Map display names: GBE -> GB for display
+    portfolio_display_names = []
+    for p in portfolios:
+        if p == 'GBE':
+            portfolio_display_names.append('GB')
+        else:
+            portfolio_display_names.append(p)
     
     metrics_data = [
         ('ytd', 'YTD', time_period_colors[0]),
@@ -1108,6 +1114,24 @@ def create_allocation_pie_chart(data):
     
     # Combine allocations that map to the same display name (e.g., Cash + US_LT_Treas both become "Cash")
     latest_allocation = latest_allocation.groupby('display_name')['allocation_percentage'].sum().reset_index()
+    
+    # Filter out zero or near-zero allocations
+    latest_allocation = latest_allocation[latest_allocation['allocation_percentage'] > 0.001]  # Greater than 0.1%
+    
+    # Check if we have any data after filtering
+    if latest_allocation.empty:
+        fig = go.Figure()
+        fig.add_annotation(
+            text="No allocation data available",
+            xref="paper", yref="paper",
+            x=0.5, y=0.5, xanchor='center', yanchor='middle',
+            showarrow=False, font=dict(size=16)
+        )
+        fig.update_layout(
+            title='Target Asset Allocation',
+            height=500
+        )
+        return fig
     
     # Determine strategy from data context
     strategy = data.get('strategy', 'GA')
