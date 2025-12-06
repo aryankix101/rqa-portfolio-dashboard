@@ -215,7 +215,7 @@ def read_ga_excel_data():
 def read_gbe_excel_data():
     """Read GBE.xlsx and extract monthly returns, allocations, and attribution data"""
     # Load with data_only=True to read calculated formula values instead of formulas
-    wb = openpyxl.load_workbook('GBE.xlsx', data_only=True)
+    wb = openpyxl.load_workbook('GBEv3.xlsx', data_only=True)
     ws = wb.active
     
     # GBE asset mapping - 14 ETFs
@@ -271,7 +271,14 @@ def read_gbe_excel_data():
         
         # Extract monthly returns data (columns 2-3 for GBE, then benchmark columns)
         gbe_returns_gross = safe_float_convert(ws.cell(row=row, column=2).value)
-        gbe_returns_net = safe_float_convert(ws.cell(row=row, column=3).value)
+        
+        # If column 3 has a value, use it; otherwise calculate from gross
+        gbe_returns_net_raw = safe_float_convert(ws.cell(row=row, column=3).value)
+        if gbe_returns_net_raw is not None:
+            gbe_returns_net = gbe_returns_net_raw
+        else:
+            monthly_fee = 0.005 / 12
+            gbe_returns_net = gbe_returns_gross - monthly_fee if gbe_returns_gross is not None else None
         
         # Benchmarks (assuming similar structure to GA - adjust if different)
         acwi = safe_float_convert(ws.cell(row=row, column=4).value)
@@ -381,15 +388,39 @@ def store_gbe_data(conn, gbe_monthly_returns_df, gbe_allocations_df, gbe_attribu
     gbe_attribution_df.to_sql('gbe_attribution', conn, if_exists='replace', index=False)
 
 
-def calculate_benchmark_performance(conn, monthly_returns_df):
-    df = monthly_returns_df.copy()
+def calculate_benchmark_performance(conn, ga_monthly_returns_df=None, gbe_monthly_returns_df=None):
+    """Calculate benchmark performance for GA, GBE, and portfolio benchmarks
+    
+    Args:
+        conn: Database connection
+        ga_monthly_returns_df: DataFrame with GA monthly returns (optional)
+        gbe_monthly_returns_df: DataFrame with GBE monthly returns (optional)
+    """
+    # Merge GA and GBE data if both provided
+    if ga_monthly_returns_df is not None and gbe_monthly_returns_df is not None:
+        # Merge on date, keeping all benchmark columns from GA
+        df = ga_monthly_returns_df.merge(
+            gbe_monthly_returns_df[['date', 'gbe_returns_gross', 'gbe_returns_net']], 
+            on='date', 
+            how='outer'
+        ).sort_values('date')
+    elif ga_monthly_returns_df is not None:
+        df = ga_monthly_returns_df.copy()
+    elif gbe_monthly_returns_df is not None:
+        df = gbe_monthly_returns_df.copy()
+    else:
+        return  # No data to process
+    
     df['date'] = pd.to_datetime(df['date'])
-    df = df.sort_values('date').dropna()
+    df = df.sort_values('date').dropna(subset=['date'])
     
     portfolios = {
         'GA': 'ga_returns_net',
+        'GBE': 'gbe_returns_net',
         '60/40': 'portfolio_60_40', 
-        '70/30': 'portfolio_70_30'
+        '70/30': 'portfolio_70_30',
+        '50/50': 'portfolio_50_50',
+        'AGG': 'agg',
     }
     
     performance_data = []
@@ -400,7 +431,11 @@ def calculate_benchmark_performance(conn, monthly_returns_df):
             continue
         
         dates = df.loc[returns.index, 'date']
-        spy_returns = df.loc[returns.index, 'spy'].dropna()
+        
+        # For beta calculation, align returns and spy_returns by dropping NaN from both
+        returns_for_beta = df.loc[returns.index, [column_name, 'spy']].dropna()
+        aligned_returns = returns_for_beta[column_name]
+        spy_returns = returns_for_beta['spy']
         
         ytd = ytd_return(returns, dates)
         one_year = annualized_return(returns, 12)
@@ -408,7 +443,7 @@ def calculate_benchmark_performance(conn, monthly_returns_df):
         since_inception = annualized_return(returns, len(returns))
         standard_deviation = annualized_std(returns)
         sharpe_ratio_val = sharpe_ratio(returns)
-        beta = calculate_beta(returns, spy_returns) if column_name != 'spy' else 1.0
+        beta = calculate_beta(aligned_returns, spy_returns) if column_name != 'spy' else 1.0
         
         performance_data.append({
             'portfolio': portfolio_name,
@@ -474,9 +509,8 @@ def main():
     print("Storing GA data...")
     store_all_data(conn, monthly_returns_df, ga_allocations_df, ga_attribution_df)
     
-    print("Calculating GA benchmark performance...")
-    calculate_benchmark_performance(conn, monthly_returns_df)
-    
+    # Read GBE data
+    gbe_monthly_returns_df = None
     print("\nReading GBE Excel data...")
     try:
         gbe_monthly_returns_df, gbe_allocations_df, gbe_attribution_df = read_gbe_excel_data()
@@ -486,9 +520,13 @@ def main():
         
         print("GBE data migration complete!")
     except FileNotFoundError:
-        print("⚠️  GBE.xlsx not found - skipping GBE data migration")
+        print("⚠️  GBEv2.xlsx not found - skipping GBE data migration")
     except Exception as e:
         print(f"⚠️  Error processing GBE data: {e}")
+    
+    # Calculate benchmark performance for both GA and GBE
+    print("\nCalculating benchmark performance metrics...")
+    calculate_benchmark_performance(conn, monthly_returns_df, gbe_monthly_returns_df)
     
     print("\n✅ Database creation complete!")
     

@@ -900,41 +900,41 @@ def calculate_ga_performance_metrics(data_dict):
     strategy = data_dict.get('strategy', 'GA')
     returns_col = data_dict.get('returns_column', 'ga_returns_net')
 
-    # For GA, use GA benchmark. For GB, calculate metrics from monthly returns
-    if strategy == 'GA':
-        ga_benchmark = benchmark_data[benchmark_data['portfolio'] == 'GA']
-        
-        if not ga_benchmark.empty:
-            ga_data = ga_benchmark.iloc[0]
-            
-            # Calculate 3-year return from monthly returns data
-            df = monthly_returns_df.copy()
-            df['date'] = pd.to_datetime(df['date'])
-            current_date = df['date'].max()
-            three_years_ago = current_date - timedelta(days=3*365.25)
-            three_year_data = df[df['date'] >= three_years_ago]
-            
-            if len(three_year_data) >= 24:
-                three_year_total_return = (1 + three_year_data[returns_col]).prod() - 1
-                years = len(three_year_data) / 12
-                three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
-            else:
-                three_year_annualized = 0.0
-            
-            return {
-                'ytd': ga_data['ytd'],
-                'one_year': ga_data['one_year'],
-                'three_year': three_year_annualized,
-                'five_year': ga_data['five_year'],
-                'since_inception': ga_data['since_inception'],
-                'standard_deviation': ga_data['standard_deviation'],
-                'sharpe_ratio': ga_data['sharpe_ratio'],
-                'beta_to_sp500': ga_data['beta_to_sp500'],
-                'max_drawdown': 0.0,
-                'downside_deviation': 0.0
-            }
+    # Use benchmark_performance table for both GA and GB (GBE)
+    portfolio_name = 'GA' if strategy == 'GA' else 'GBE'
+    strategy_benchmark = benchmark_data[benchmark_data['portfolio'] == portfolio_name]
     
-    # For GB, calculate all metrics from monthly returns
+    if not strategy_benchmark.empty:
+        strategy_data = strategy_benchmark.iloc[0]
+        
+        # Only calculate 3-year return (not in database) from monthly returns data
+        df = monthly_returns_df.copy()
+        df['date'] = pd.to_datetime(df['date'])
+        current_date = df['date'].max()
+        three_years_ago = current_date - timedelta(days=3*365.25)
+        three_year_data = df[df['date'] >= three_years_ago]
+        
+        if len(three_year_data) >= 24:
+            three_year_total_return = (1 + three_year_data[returns_col]).prod() - 1
+            years = len(three_year_data) / 12
+            three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
+        else:
+            three_year_annualized = 0.0
+        
+        return {
+            'ytd': strategy_data['ytd'],
+            'one_year': strategy_data['one_year'],
+            'three_year': three_year_annualized,
+            'five_year': strategy_data['five_year'],
+            'since_inception': strategy_data['since_inception'],
+            'standard_deviation': strategy_data['standard_deviation'],
+            'sharpe_ratio': strategy_data['sharpe_ratio'],
+            'beta_to_sp500': strategy_data['beta_to_sp500'],
+            'max_drawdown': 0.0,
+            'downside_deviation': 0.0
+        }
+    
+    # Fallback: calculate all metrics from monthly returns if not in database
     df = monthly_returns_df.copy()
     df['date'] = pd.to_datetime(df['date'])
     
@@ -1380,15 +1380,13 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
         
         benchmark_perf = benchmark_data[benchmark_data['portfolio'] == benchmark_portfolio].iloc[0] if not benchmark_data.empty else None
         
-        # Calculate 3-year and 5-year returns for benchmarks from monthly returns data
+        # Only calculate 3-year for benchmarks (not in database) from monthly returns data
         monthly_returns_df = data['monthly_returns']
         df = monthly_returns_df.copy()
         df['date'] = pd.to_datetime(df['date'])
         current_date = df['date'].max()
         three_years_ago = current_date - timedelta(days=3*365.25)
-        five_years_ago = current_date - timedelta(days=5*365.25)
         three_year_data = df[df['date'] >= three_years_ago]
-        five_year_data = df[df['date'] >= five_years_ago]
         
         # Calculate 3-year for main benchmark
         if len(three_year_data) >= 24:
@@ -1398,13 +1396,8 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
         else:
             three_year_annualized_benchmark = 0.0
         
-        # Calculate 5-year for main benchmark
-        if len(five_year_data) >= 48:
-            five_year_total_return_benchmark = (1 + five_year_data[benchmark_col]).prod() - 1
-            years = len(five_year_data) / 12
-            five_year_annualized_benchmark = (1 + five_year_total_return_benchmark) ** (1/years) - 1 if years > 0 else None
-        else:
-            five_year_annualized_benchmark = None
+        # Use 5-year from database (already calculated with correct methodology)
+        five_year_annualized_benchmark = benchmark_perf['five_year'] if benchmark_perf is not None else None
         
         performance_data = {
             '': [strategy_display_name, benchmark_display_name],
@@ -1455,39 +1448,14 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
         df_risk = pd.DataFrame(risk_data)
         st.dataframe(df_risk, hide_index=True, use_container_width=True)
         
-        # Key Strategy Features (move above Portfolio Management)
-        st.markdown("""
-        <div style="background: #3b5998; color: white; padding: 0.9rem 1.4rem; border-radius: 8px; margin: 1rem 0 0.4rem 0;">
-            <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        if strategy == 'GA':
+        # Key Strategy Features - only show here for GB (above Portfolio Management)
+        if strategy == 'GB':
             st.markdown("""
-            <ul style="list-style:none; padding:0; margin:0 0 1rem 0;">
-                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                    <span style="line-height:1.15;">Tactical Asset Allocation</span>
-                </li>
-                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                    <span style="line-height:1.15;">Global Diversification</span>
-                </li>
-                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                    <span style="line-height:1.15;">Systematic Risk Management</span>
-                </li>
-                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
-                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                    <span style="line-height:1.15;">Daily Liquidity</span>
-                </li>
-                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem;">
-                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
-                    <span style="line-height:1.15;">Monthly Rebalancing</span>
-                </li>
-            </ul>
+            <div style="background: #3b5998; color: white; padding: 0.9rem 1.4rem; border-radius: 8px; margin: 1rem 0 0.4rem 0;">
+                <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
+            </div>
             """, unsafe_allow_html=True)
-        else:  # GB
+            
             st.markdown("""
             <ul style="list-style:none; padding:0; margin:0 0 1rem 0;">
                 <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
@@ -1692,6 +1660,39 @@ def create_fact_sheet_landing(data, ga_metrics, strategy='GA'):
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
+        
+        # Key Strategy Features - only show here for GA (after Target Allocation)
+        if strategy == 'GA':
+            st.markdown("""
+            <div style="background: #3b5998; color: white; padding: 0.9rem 1.4rem; border-radius: 8px; margin: 1rem 0 0.4rem 0;">
+                <h2 style="color: white; margin: 0; font-size: 1.5rem; font-weight: bold;">KEY STRATEGY FEATURES</h2>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("""
+            <ul style="list-style:none; padding:0; margin:0 0 1rem 0;">
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Tactical Asset Allocation</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Global Diversification</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Systematic Risk Management</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0 0 0.5rem 0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Daily Liquidity</span>
+                </li>
+                <li style="display:flex; align-items:flex-start; gap:0.55rem; margin:0; font-size:0.95rem;">
+                    <span style="color:#3b5998; font-weight:600; line-height:1; padding-top:2px;">•</span>
+                    <span style="line-height:1.15;">Monthly Rebalancing</span>
+                </li>
+            </ul>
+            """, unsafe_allow_html=True)
 
 
 

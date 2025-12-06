@@ -25,7 +25,7 @@ portfolios = {
     '70/30': {'ACWI': 0.7, 'AGG': 0.3},
 }
 
-start = datetime(2020, 12, 31)
+start = datetime(2018, 12, 31)
 today = datetime.today()
 dates = pd.date_range(start, today, freq='ME')
 
@@ -57,7 +57,7 @@ def get_portfolio_return(weights, returns_dict):
 
 portfolio_returns = {name: get_portfolio_return(w, returns_dict) for name, w in portfolios.items()}
 
-wb = openpyxl.load_workbook('GBE.xlsx')
+wb = openpyxl.load_workbook('GBEv3.xlsx')
 ws = wb.active
 
 col_map = {
@@ -106,5 +106,5 @@ for date in returns_dict['ACWI'].index:
         if val is not None and not (isinstance(val, float) and (np.isnan(val) or np.isinf(val))):
             ws.cell(row=row, column=col_map[p]).value = round(val, 4)
 
-wb.save('GBE.xlsx')
+wb.save('GBEv3.xlsx')
 print("Excel file updated successfully!")
