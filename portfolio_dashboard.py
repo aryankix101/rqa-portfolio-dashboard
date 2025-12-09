@@ -904,153 +904,40 @@ def calculate_ga_performance_metrics(data_dict):
     portfolio_name = 'GA' if strategy == 'GA' else 'GBE'
     strategy_benchmark = benchmark_data[benchmark_data['portfolio'] == portfolio_name]
     
-    if not strategy_benchmark.empty:
-        strategy_data = strategy_benchmark.iloc[0]
-        
-        # Only calculate 3-year return (not in database) from monthly returns data
-        df = monthly_returns_df.copy()
-        df['date'] = pd.to_datetime(df['date'])
-        current_date = df['date'].max()
-        three_years_ago = current_date - timedelta(days=3*365.25)
-        three_year_data = df[df['date'] >= three_years_ago]
-        
-        if len(three_year_data) >= 24:
-            three_year_total_return = (1 + three_year_data[returns_col]).prod() - 1
-            years = len(three_year_data) / 12
-            three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
-        else:
-            three_year_annualized = 0.0
-        
-        return {
-            'ytd': strategy_data['ytd'],
-            'one_year': strategy_data['one_year'],
-            'three_year': three_year_annualized,
-            'five_year': strategy_data['five_year'],
-            'since_inception': strategy_data['since_inception'],
-            'standard_deviation': strategy_data['standard_deviation'],
-            'sharpe_ratio': strategy_data['sharpe_ratio'],
-            'beta_to_sp500': strategy_data['beta_to_sp500'],
-            'max_drawdown': 0.0,
-            'downside_deviation': 0.0
-        }
-    
-    # Fallback: calculate all metrics from monthly returns if not in database
-    df = monthly_returns_df.copy()
-    df['date'] = pd.to_datetime(df['date'])
-    
-    if returns_col not in df.columns:
+    if strategy_benchmark.empty:
+        # Return empty metrics if no data found
         return {
             'ytd': 0.0, 'one_year': 0.0, 'three_year': 0.0, 'five_year': 0.0,
             'since_inception': 0.0, 'standard_deviation': 0.0, 'sharpe_ratio': 0.0,
             'beta_to_sp500': 0.0, 'max_drawdown': 0.0, 'downside_deviation': 0.0
         }
     
-    returns = df[returns_col].dropna()
+    strategy_data = strategy_benchmark.iloc[0]
     
-    if len(returns) < 2:
-        # Return what we can calculate with limited data
-        if len(returns) == 1:
-            return {
-                'ytd': returns.iloc[0],
-                'one_year': 0.0,
-                'three_year': 0.0,
-                'five_year': 0.0,
-                'since_inception': returns.iloc[0],
-                'standard_deviation': 0.0,
-                'sharpe_ratio': 0.0,
-                'beta_to_sp500': 0.0,
-                'max_drawdown': 0.0,
-                'downside_deviation': 0.0
-            }
-        else:
-            return {
-                'ytd': 0.0, 'one_year': 0.0, 'three_year': 0.0, 'five_year': 0.0,
-                'since_inception': 0.0, 'standard_deviation': 0.0, 'sharpe_ratio': 0.0,
-                'beta_to_sp500': 0.0, 'max_drawdown': 0.0, 'downside_deviation': 0.0
-            }
-    
+    # Only calculate 3-year return (not in database) from monthly returns data
+    df = monthly_returns_df.copy()
+    df['date'] = pd.to_datetime(df['date'])
     current_date = df['date'].max()
-    
-    # YTD
-    current_year = current_date.year
-    ytd_data = returns[df['date'].dt.year == current_year]
-    ytd_return = (1 + ytd_data).prod() - 1 if len(ytd_data) > 0 else 0.0
-    
-    # 1-Year - need at least 11 months
-    one_year_ago = current_date - timedelta(days=365.25)
-    one_year_data = returns[df['date'] >= one_year_ago]
-    if len(one_year_data) >= 11:
-        one_year_total = (1 + one_year_data).prod() - 1
-        years = len(one_year_data) / 12
-        one_year_return = (1 + one_year_total) ** (1/years) - 1 if years > 0 else 0
-    else:
-        one_year_return = None  # Not enough data
-    
-    # 3-Year - need at least 30 months
     three_years_ago = current_date - timedelta(days=3*365.25)
-    three_year_data = returns[df['date'] >= three_years_ago]
-    if len(three_year_data) >= 30:
-        three_year_total = (1 + three_year_data).prod() - 1
+    three_year_data = df[df['date'] >= three_years_ago]
+    
+    if len(three_year_data) >= 24:
+        three_year_total_return = (1 + three_year_data[returns_col]).prod() - 1
         years = len(three_year_data) / 12
-        three_year_return = (1 + three_year_total) ** (1/years) - 1 if years > 0 else 0
+        three_year_annualized = (1 + three_year_total_return) ** (1/years) - 1 if years > 0 else 0
     else:
-        three_year_return = None  # Not enough data
+        three_year_annualized = 0.0
     
-    # 5-Year - need at least 48 months (4 years) to estimate 5-year annualized
-    five_years_ago = current_date - timedelta(days=5*365.25)
-    five_year_data = returns[df['date'] >= five_years_ago]
-    if len(five_year_data) >= 48:
-        five_year_total = (1 + five_year_data).prod() - 1
-        years = len(five_year_data) / 12
-        five_year_return = (1 + five_year_total) ** (1/years) - 1 if years > 0 else 0
-    else:
-        five_year_return = None  # Not enough data
-    
-    # Since Inception - need at least 2 months
-    if len(returns) >= 2:
-        cumulative_return = (1 + returns).prod() - 1
-        years = len(returns) / 12
-        since_inception = (1 + cumulative_return) ** (1/years) - 1 if years > 0 else 0
-    else:
-        since_inception = returns.iloc[0] if len(returns) == 1 else 0.0
-    
-    # Risk metrics - need at least 12 months for meaningful volatility
-    if len(returns) >= 12:
-        std_dev = returns.std() * np.sqrt(12)
-    else:
-        std_dev = None  # Not enough data for annualized vo latility
-    
-    # Sharpe ratio - need both return and volatility
-    if std_dev is not None and std_dev > 0:
-        annualized_return = since_inception
-        sharpe = annualized_return / std_dev
-    else:
-        sharpe = None
-    
-    # Beta to S&P 500 - need at least 12 months
-    if len(returns) >= 12:
-        spy_returns = df['spy'].dropna()
-        aligned_returns = returns[returns.index.isin(spy_returns.index)]
-        aligned_spy = spy_returns[spy_returns.index.isin(returns.index)]
-        
-        if len(aligned_returns) >= 12 and len(aligned_spy) >= 12:
-            covariance = np.cov(aligned_returns, aligned_spy)[0][1]
-            spy_variance = np.var(aligned_spy)
-            beta = covariance / spy_variance if spy_variance > 0 else None
-        else:
-            beta = None
-    else:
-        beta = None
-    
+    # All other metrics come directly from database
     return {
-        'ytd': ytd_return,
-        'one_year': one_year_return,
-        'three_year': three_year_return,
-        'five_year': five_year_return,
-        'since_inception': since_inception,
-        'standard_deviation': std_dev,
-        'sharpe_ratio': sharpe,
-        'beta_to_sp500': beta,
+        'ytd': strategy_data['ytd'],
+        'one_year': strategy_data['one_year'],
+        'three_year': three_year_annualized,  # Only calculated metric
+        'five_year': strategy_data['five_year'],
+        'since_inception': strategy_data['since_inception'],
+        'standard_deviation': strategy_data['standard_deviation'],
+        'sharpe_ratio': strategy_data['sharpe_ratio'],
+        'beta_to_sp500': strategy_data['beta_to_sp500'],
         'max_drawdown': 0.0,
         'downside_deviation': 0.0
     }

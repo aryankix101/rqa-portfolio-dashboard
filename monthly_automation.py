@@ -97,7 +97,7 @@ class MonthlyAutomation:
     def run_scheduled_job(self):
         if datetime.now().day == 1:
             self.logger.info("📅 First of month - running workflow")
-            self.run_monthly_workflow()
+            self.run_monthly_workflow() 
         else:
             self.logger.info("📅 Not first of month - skipping")
     

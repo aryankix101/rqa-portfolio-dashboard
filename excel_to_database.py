@@ -398,21 +398,30 @@ def calculate_benchmark_performance(conn, ga_monthly_returns_df=None, gbe_monthl
     """
     # Merge GA and GBE data if both provided
     if ga_monthly_returns_df is not None and gbe_monthly_returns_df is not None:
-        # Merge on date, keeping all benchmark columns from GA
+        # Merge on date, keeping strategy returns from both
+        # For benchmarks: use GA's benchmarks for GA comparisons, GBE's AGG for GBE comparisons
         df = ga_monthly_returns_df.merge(
-            gbe_monthly_returns_df[['date', 'gbe_returns_gross', 'gbe_returns_net']], 
+            gbe_monthly_returns_df[['date', 'gbe_returns_gross', 'gbe_returns_net', 'agg']], 
             on='date', 
-            how='outer'
+            how='outer',
+            suffixes=('_ga', '_gbe')
         ).sort_values('date')
+        # Use GBE's AGG column
+        df['agg'] = df['agg_gbe'].fillna(df.get('agg_ga', df['agg_gbe']))
+        df = df.drop(columns=[col for col in df.columns if col in ['agg_ga', 'agg_gbe']], errors='ignore')
     elif ga_monthly_returns_df is not None:
         df = ga_monthly_returns_df.copy()
     elif gbe_monthly_returns_df is not None:
         df = gbe_monthly_returns_df.copy()
     else:
-        return  # No data to process
+        return  
     
     df['date'] = pd.to_datetime(df['date'])
     df = df.sort_values('date').dropna(subset=['date'])
+    
+    # Get inception dates for GA and GBE
+    ga_inception = df['ga_returns_net'].first_valid_index()
+    gbe_inception = df['gbe_returns_net'].first_valid_index()
     
     portfolios = {
         'GA': 'ga_returns_net',
@@ -431,6 +440,17 @@ def calculate_benchmark_performance(conn, ga_monthly_returns_df=None, gbe_monthl
             continue
         
         dates = df.loc[returns.index, 'date']
+        
+        # Align benchmark timeframes with their respective strategies
+        # AGG is GBE benchmark - use GBE inception
+        if portfolio_name in ['AGG','50/50'] and gbe_inception is not None:
+            # Filter AGG returns to match GBE timeframe
+            returns = returns.loc[gbe_inception:]
+            dates = df.loc[returns.index, 'date']
+        elif portfolio_name in ['60/40', '70/30'] and ga_inception is not None:
+            # Filter these benchmarks to match GA timeframe
+            returns = returns.loc[ga_inception:]
+            dates = df.loc[returns.index, 'date']
         
         # For beta calculation, align returns and spy_returns by dropping NaN from both
         returns_for_beta = df.loc[returns.index, [column_name, 'spy']].dropna()
