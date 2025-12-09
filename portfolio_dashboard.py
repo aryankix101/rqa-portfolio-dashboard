@@ -236,16 +236,12 @@ def create_growth_chart(data):
     returns_col = data.get('returns_column', 'ga_returns_net')
     strategy_name = 'RQA Global Adaptive' if strategy == 'GA' else 'RQA Global Balanced'
     
-    # Filter start date for GB only
-    # GA: starts from inception (2019) - no filtering
-    # GB: starts from 2021-01-31 for consistent comparison
     if strategy == 'GB':
-        start_date = pd.to_datetime('2021-01-31')
+        start_date = pd.to_datetime('2019-01-31')
         df = df[df['date'] >= start_date].copy()
     
     initial_investment = 100000
     
-    # Use hardcoded column names to match original GA implementation
     if strategy == 'GA':
         df['ga_cumulative'] = initial_investment * (1 + df['ga_returns_net']).cumprod()
         strategy_col = 'ga_cumulative'
